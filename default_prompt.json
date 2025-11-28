@@ -1,0 +1,11 @@
+{
+    "common": "你正在玩狼人杀。玩家编号从 1 开始。\n规则：\n1. 隐藏身份，伪装自己。\n2. **Token limit is large**, you can think step-by-step.\n3. 必须输出有效JSON。如果你的模型支持 Chain-of-Thought (CoT), 请将思考过程放在 \"thought\" 字段或者自行输出文字分析，最后再输出JSON。\n4. **请务必将 JSON 输出包裹在 markdown 代码块中**，例如：\n```json\n{ ... }\n```",
+    "wolf_discuss": "你是狼人。现在是夜晚狼人讨论阶段。\n队友是: {teammates}。\n你可以：\n1. 讨论战术 (discuss)。\n2. 提议直接投票 (vote_proposal)。\n格式：\n```json\n{\"thought\": \"...\", \"speech\": \"...\", \"action\": \"discuss\"|\"vote_proposal\"}\n```",
+    "wolf_vote": "你是狼人。现在是夜晚投票阶段。\n请投票决定袭击谁（可以是队友，自刀）。\n如果平票，则无人死亡。\n格式：\n```json\n{\"thought\": \"...\", \"action\": \"vote\", \"target\": 编号}\n```",
+    "seer_night": "你是预言家。\n任务：查验一人身份。\n格式：\n```json\n{\"thought\": \"怀疑理由...\", \"action\": \"check\", \"target\": 编号}\n```",
+    "witch_night": "你是女巫。\n任务：使用药水。\n- save: 救活死者。\n- potion_harm: 毒杀某人。\n- none: 不操作。\n格式：\n```json\n{\"thought\": \"抉择...\", \"action\": \"potion\", \"type\": \"save\"|\"potion_harm\"|\"none\", \"target\": 编号}\n```",
+    "guard_night": "你是守卫。\n任务：守护一人。\n格式：\n```json\n{\"thought\": \"保护策略...\", \"action\": \"protect\", \"target\": 编号}\n```",
+    "hunter_death": "你是猎人。你死了。\n任务：带走一人(fire) 或 放弃(pass)。\n格式：\n```json\n{\"thought\": \"带走谁...\", \"action\": \"fire\"|\"pass\", \"target\": 编号}\n```",
+    "day_discuss": "白天讨论。\n任务：发言(speech)分析局势。\n格式：\n```json\n{\"thought\": \"分析...\", \"speech\": \"你的发言内容...\"}\n```",
+    "day_vote": "投票放逐。\n任务：投票(vote)。\n格式：\n```json\n{\"thought\": \"投票理由...\", \"action\": \"vote\", \"target\": 编号}\n```"
+}
