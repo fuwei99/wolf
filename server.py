@@ -10,6 +10,7 @@ CONFIG_FILE = "config.json"
 DEFAULT_PROMPT_FILE = "default_prompt.json"
 SAVES_DIR = "saves"
 PRESETS_DIR = "presets"
+LOGS_DIR = "logs"
 HTML_FILE = "wolf.html"
 
 # 默认配置，如果 config.json 不存在或读取失败时使用
@@ -135,6 +136,14 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"status": "ok"})
             return
 
+        # API: 记录调试日志
+        if path == '/api/debug_log':
+            filepath = os.path.join(LOGS_DIR, 'latest.json')
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, indent=4, ensure_ascii=False)
+            self.send_json({"status": "ok"})
+            return
+
         self.send_error(404, "API endpoint not found")
 
     def do_DELETE(self):
@@ -187,6 +196,7 @@ def start_server():
     # 确保目录存在
     if not os.path.exists(SAVES_DIR): os.makedirs(SAVES_DIR)
     if not os.path.exists(PRESETS_DIR): os.makedirs(PRESETS_DIR)
+    if not os.path.exists(LOGS_DIR): os.makedirs(LOGS_DIR)
 
     config = load_config()
     port = config.get('port', 169)

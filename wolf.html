@@ -311,13 +311,13 @@
         /**
          * 1. CONFIG & CONSTANTS
          */
-        const DEFAULT_ROLES = ['狼人', '狼人', '预言家', '女巫', '猎人', '守卫', '村民', '村民'];
+        const DEFAULT_ROLES = ['白狼王', '狼人', '狼人', '狼人', '预言家', '女巫', '猎人', '守卫', '丘比特', '白痴', '村民', '村民', '村民', '村民', '村民', '村民'];
         let appConfig = {
             apiBase: "",
             apiKey: "",
             maxRetries: 3,
             prompts: {}, // Will load from server
-            rolesSetup: [...DEFAULT_ROLES],
+            rolesSetup: [...DEFAULT_ROLES].slice(0, 8), // Default 8 players
             modelsSetup: Array(8).fill('gpt-3.5-turbo')
         };
 
@@ -328,7 +328,8 @@
         let gameState = {
             status: 'setup', dayCount: 0, phase: 'night', subPhase: 'init',
             logs: [], settings: { potion: { save: true, harm: true } },
-            guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 }
+            guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
+            cupidAct: null, sheriffId: -1
         };
         let players = [];
         let availableModels = ['gpt-3.5-turbo', 'gpt-4o-mini'];
@@ -519,7 +520,8 @@
             gameState = {
                 status: 'setup', dayCount: 0, phase: 'night', subPhase: 'init',
                 logs: [], settings: { potion: { save: true, harm: true } },
-                guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 }
+                guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
+                cupidAct: null, sheriffId: -1
             };
             players = [];
             historyStack = [];
@@ -542,9 +544,10 @@
         function startGame() {
             players = [];
             gameState = {
-                status: 'playing', dayCount: 1, phase: 'night', subPhase: 'wolf',
+                status: 'playing', dayCount: 1, phase: 'night', subPhase: 'cupid', // Start with Cupid
                 logs: [], settings: { potion: { save: true, harm: true } },
-                guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 }
+                guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
+                cupidAct: null, sheriffId: -1
             };
             historyStack = [];
             document.getElementById('gameLog').innerHTML = '';
@@ -555,15 +558,16 @@
             // 1. Collect Config
             for (let i = 0; i < count; i++) {
                 const r = document.getElementById(`role-${i}`).value;
-                if (r === '狼人') w.push(i);
+                if (r === '狼人' || r === '白狼王') w.push(i);
                 players.push({
                     id: i, role: r, model: document.getElementById(`model-${i}`).value,
-                    alive: true, privateMem: [], avatar: getAvatar(r)
+                    alive: true, privateMem: [], avatar: getAvatar(r),
+                    isSheriff: false, isCouple: false, coupleId: -1, isIdiotRevealed: false, canVote: true, deathReason: null
                 });
             }
 
             // 2. Validation
-            const good = players.filter(p => p.role !== '狼人');
+            const good = players.filter(p => p.role !== '狼人' && p.role !== '白狼王');
             if (w.length < 1 || good.length < 1) {
                 alert("配置错误：至少需要 1 个狼人和 1 个好人！");
                 return;
@@ -572,10 +576,13 @@
             // 3. Init Memory
             players.forEach(p => {
                 let m = `你的编号是 ${p.id + 1}号。身份: ${p.role}。`;
-                if (p.role === '狼人') {
+                if (p.role === '狼人' || p.role === '白狼王') {
                     const mates = w.filter(x => x !== p.id).map(x => `${x + 1}号`).join(', ');
                     m += ` 队友: ${mates || '无'}。`;
                 }
+                if (p.role === '白狼王') m += " 你是白狼王，白天可以自爆带人。";
+                if (p.role === '丘比特') m += " 你是丘比特，首夜可以连接两名情侣。";
+                if (p.role === '白痴') m += " 你是白痴，被公投出局可以翻牌免死。";
                 p.privateMem.push(m);
             });
 
@@ -609,19 +616,25 @@
         }
 
         async function processPhase() {
-            const w = players.filter(p => p.alive && p.role === '狼人');
-            const h = players.filter(p => p.alive && p.role !== '狼人');
-            if (w.length === 0) return gameOver(true);
-            if (w.length >= h.length) return gameOver(false);
+            const wolves = players.filter(p => p.alive && (p.role === '狼人' || p.role === '白狼王'));
+            const gods = players.filter(p => p.alive && ['预言家', '女巫', '猎人', '守卫', '丘比特', '白痴'].includes(p.role));
+            const villagers = players.filter(p => p.alive && p.role === '村民');
+
+            // Victory Condition: Slaughter the Side (屠边)
+            if (wolves.length === 0) return gameOver(true); // Good wins
+            if (gods.length === 0 || villagers.length === 0) return gameOver(false); // Wolf wins
 
             switch (gameState.subPhase) {
+                case 'cupid': await runCupid(); break;
                 case 'wolf': await runWolf(); break;
                 case 'seer': await runRole('预言家', 'seer_night'); break;
                 case 'guard': await runRole('守卫', 'guard_night'); break;
                 case 'witch': await runWitch(); break;
                 case 'morning': resolveMorning(); break;
+                case 'election': await runElection(); break;
                 case 'discuss': await runDiscuss(); break;
                 case 'vote': await runVote(); break;
+                case 'review': await runReview(); break;
             }
         }
 
@@ -629,7 +642,8 @@
          * 5. STREAMING & PARSING (CoT Logic)
          */
         async function streamLLM(player, key, instruct) {
-            if (!player.alive) return null;
+            // Allow dead players to speak during review
+            if (!player.alive && gameState.subPhase !== 'review') return null;
 
             document.getElementById('activePlayerName').innerText = `${player.id + 1}号`;
             const card = document.getElementById(`card-${player.id}`);
@@ -638,16 +652,26 @@
 
             let final = "";
             const outEl = document.getElementById('streamingOutput');
-            outEl.innerHTML = ''; // Clear prev
 
-            // Convert internal 0-based IDs to 1-based for Prompt
-            const aliveList = players.filter(p => p.alive).map(p => `${p.id + 1}号`).join(', ');
+            // Retry Logic
+            let attempts = 0;
+            const maxRetries = appConfig.maxRetries || 3;
 
-            // Filter logs: Only show public logs to everyone.
-            // Private logs are strictly hidden from LLM context unless it's their own memory (which is handled by privateMem).
-            const publicLogs = gameState.logs.filter(l => l.type === 'public').slice(-15).map(l => l.content).join('\n');
+            while (attempts < maxRetries) {
+                attempts++;
+                final = "";
+                outEl.innerHTML = `<span class="text-gray-500">尝试 ${attempts}/${maxRetries}...</span>`;
 
-            const context = `
+                // Convert internal 0-based IDs to 1-based for Prompt
+                const aliveList = players.filter(p => p.alive).map(p => `${p.id + 1}号`).join(', ');
+
+                // Filter logs: Only show public logs to everyone.
+                const publicLogs = gameState.logs
+                    .filter(l => l.type === 'public' || l.type === 'sys')
+                    .map(l => l.content)
+                    .join('\n');
+
+                const context = `
 [Public History]
 ${publicLogs}
 [Private Memory]
@@ -658,64 +682,83 @@ ${aliveList}
 Current Phase: ${gameState.subPhase}
 Instruction: ${instruct}`;
 
-            const sys = appConfig.prompts.common + "\n" + appConfig.prompts[key];
+                const sys = appConfig.prompts.common + "\n" + appConfig.prompts[key];
 
-            try {
-                const res = await fetch(`${appConfig.apiBase}/chat/completions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appConfig.apiKey}` },
-                    body: JSON.stringify({
-                        model: player.model,
-                        messages: [{ role: 'system', content: sys }, { role: 'user', content: context }],
-                        temperature: 0.7,
-                        max_tokens: 4096, // HUGE TOKEN LIMIT
-                        stream: true
-                    })
-                });
+                try {
+                    const res = await fetch(`${appConfig.apiBase}/chat/completions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appConfig.apiKey}` },
+                        body: JSON.stringify({
+                            model: player.model,
+                            messages: [{ role: 'system', content: sys }, { role: 'user', content: context }],
+                            temperature: 0.7,
+                            max_tokens: 4096, // HUGE TOKEN LIMIT
+                            stream: true
+                        })
+                    });
 
-                if (!res.ok) throw new Error(`API Error ${res.status}`);
+                    if (!res.ok) throw new Error(`API Error ${res.status}`);
 
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder();
 
-                let buffer = "";
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+                        for (const line of lines) {
+                            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                                try {
+                                    const txt = JSON.parse(line.slice(6)).choices[0].delta.content || "";
+                                    final += txt;
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    for (const line of lines) {
-                        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-                            try {
-                                const txt = JSON.parse(line.slice(6)).choices[0].delta.content || "";
-                                final += txt;
-                                buffer = final;
+                                    // Visual Formatting
+                                    let displayHtml = escapeHtml(final);
+                                    displayHtml = displayHtml.replace(/<think>/g, '<span class="think-text"><think>');
+                                    displayHtml = displayHtml.replace(/<\/think>/g, '</think></span>');
+                                    displayHtml = displayHtml.replace(/"thought":/g, '<span class="think-text">"thought":</span>');
+                                    displayHtml = displayHtml.replace(/"action":/g, '<span class="json-text">"action":</span>');
 
-                                // Visual Formatting for Thinking
-                                let displayHtml = escapeHtml(final);
-                                // 
-                                tags
-                                displayHtml = displayHtml.replace(/<think>/g, '<span class="think-text"><think>');
-                                displayHtml = displayHtml.replace(/<\/think>/g, '</think></span>');
-                                // Highlights JSON keys
-                                displayHtml = displayHtml.replace(/"thought":/g, '<span class="think-text">"thought":</span>');
-                                displayHtml = displayHtml.replace(/"action":/g, '<span class="json-text">"action":</span>');
-
-                                outEl.innerHTML = displayHtml + '<span class="cursor"></span>';
-                                outEl.scrollTop = outEl.scrollHeight;
-                            } catch (e) { }
+                                    outEl.innerHTML = displayHtml + '<span class="cursor"></span>';
+                                    outEl.scrollTop = outEl.scrollHeight;
+                                } catch (e) { }
+                            }
                         }
                     }
-                }
 
-            } catch (e) {
-                console.error(e);
-                final = `{"error": "failed"}`;
+                    // Check if output is valid JSON
+                    if (parseMixedOutput(final)) {
+                        break; // Success!
+                    } else {
+                        throw new Error("Invalid JSON output");
+                    }
+
+                } catch (e) {
+                    console.error(`Attempt ${attempts} failed:`, e);
+                    document.getElementById('retryIndicator').classList.remove('hidden');
+                    await new Promise(r => setTimeout(r, 1000)); // Wait 1s before retry
+                }
             }
 
+            document.getElementById('retryIndicator').classList.add('hidden');
             isStreaming = false;
             if (card) card.classList.remove('active');
+
+            // Debug Log
+            try {
+                fetch('/api/debug_log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        timestamp: new Date().toISOString(),
+                        player: player.id + 1,
+                        role: player.role,
+                        prompt: { system: sys, user: context },
+                        response: final
+                    })
+                });
+            } catch (e) { }
 
             player.privateMem.push(`(Self): ${extractActionSummary(final)}`);
             return final;
@@ -734,6 +777,7 @@ Instruction: ${instruct}`;
          * SMART PARSER: Handles Thought Fields & Tags
          */
         function parseMixedOutput(text) {
+            if (typeof text !== 'string') return null;
             try {
                 // 0. Try to extract from markdown code blocks (find ALL, use LAST valid)
                 const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/g;
@@ -769,8 +813,8 @@ Instruction: ${instruct}`;
             } catch (e) { return null; }
         }
 
-        function addLog(content, type, thoughtContent = null) {
-            const entry = { content, type, thought: thoughtContent };
+        function addLog(content, type, thoughtContent = null, role = null) {
+            const entry = { content, type, thought: thoughtContent, role };
             gameState.logs.push(entry);
             addLogToDom(entry);
         }
@@ -791,7 +835,12 @@ Instruction: ${instruct}`;
             }
 
             const text = document.createElement('div');
-            text.innerText = entry.content;
+            // For God View (UI), show role if available
+            let displayContent = entry.content;
+            if (entry.role && entry.type === 'public') {
+                displayContent = displayContent.replace(/^(\d+号)/, `$1(${entry.role})`);
+            }
+            text.innerText = displayContent;
             div.appendChild(text);
 
             const cont = document.getElementById('gameLog');
@@ -827,12 +876,14 @@ Instruction: ${instruct}`;
                 }
 
                 if (isPublic) {
-                    msg = `${playerId + 1}号(${roleName}): ${userMsg}`;
+                    // IMPORTANT: Do NOT include roleName in the content string stored in logs
+                    // It will be added dynamically for UI display, but kept hidden for AI context
+                    msg = `${playerId + 1}号: ${userMsg}`;
                 } else {
                     msg = `${roleName}行动: ${userMsg}`;
                 }
 
-                addLog(msg, isPublic ? "public" : "private", thought);
+                addLog(msg, isPublic ? "public" : "private", thought, isPublic ? roleName : null);
                 return json; // Return parsed action for logic
             }
 
@@ -844,10 +895,32 @@ Instruction: ${instruct}`;
         /**
          * 6. ROLE LOGIC WRAPPERS
          */
+        async function runCupid() {
+            addLog("=== 丘比特请睁眼 ===", "sys");
+            const cupid = players.find(p => p.role === '丘比特' && p.alive);
+            if (cupid) {
+                const raw = await streamLLM(cupid, 'cupid_night', "请选择两名玩家成为情侣 (link)。");
+                const j = processAndLogResponse(cupid.id, '丘比特', raw, false);
+                if (j && j.action === 'link' && j.target1 !== undefined && j.target2 !== undefined) {
+                    const t1 = parseInt(j.target1) - 1;
+                    const t2 = parseInt(j.target2) - 1;
+                    if (players[t1] && players[t2]) {
+                        players[t1].isCouple = true; players[t1].coupleId = t2;
+                        players[t2].isCouple = true; players[t2].coupleId = t1;
+                        players[t1].privateMem.push(`你被丘比特连成了情侣。你的伴侣是 ${t2 + 1}号。`);
+                        players[t2].privateMem.push(`你被丘比特连成了情侣。你的伴侣是 ${t1 + 1}号。`);
+                        gameState.cupidAct = { t1, t2 };
+                    }
+                }
+            }
+            gameState.subPhase = 'wolf';
+            updateHeader();
+        }
+
         async function runWolf() {
             addLog("=== 天黑请闭眼 ===", "sys");
             gameState.nightTarget = -1;
-            const wolves = players.filter(p => p.role === '狼人' && p.alive);
+            const wolves = players.filter(p => (p.role === '狼人' || p.role === '白狼王') && p.alive);
 
             if (wolves.length === 0) {
                 gameState.subPhase = 'guard';
@@ -871,6 +944,14 @@ Instruction: ${instruct}`;
 
                     const raw = await streamLLM(p, 'wolf_discuss', instruct);
                     const j = processAndLogResponse(p.id, '狼人', raw, false);
+
+                    // Share discussion with other wolves
+                    if (j && j.speech) {
+                        const chatMsg = `(队友) ${p.id + 1}号: ${j.speech}`;
+                        wolves.forEach(w => {
+                            if (w.id !== p.id) w.privateMem.push(chatMsg);
+                        });
+                    }
 
                     if (j && (j.action === 'vote_proposal' || j.action === 'vote')) {
                         readyToVote = true;
@@ -925,7 +1006,7 @@ Instruction: ${instruct}`;
                 if (j && j.target !== undefined) {
                     if (r === '预言家') {
                         const t = parseInt(j.target);
-                        const good = players[t].role !== '狼人';
+                        const good = players[t].role !== '狼人' && players[t].role !== '白狼王';
                         p.privateMem.push(`${t}号是${good ? '好人' : '狼人'}`); // Add to Seer memory
                     }
                     if (r === '守卫') gameState.guardLast = parseInt(j.target);
@@ -967,12 +1048,14 @@ Instruction: ${instruct}`;
                     // Saved by Witch
                 } else {
                     dead.push(w);
+                    if (players[w]) players[w].deathReason = 'wolf';
                 }
             }
 
             // Resolve Witch Poison
             if (gameState.witchAct.harmTarget !== -1) {
                 dead.push(gameState.witchAct.harmTarget);
+                if (players[gameState.witchAct.harmTarget]) players[gameState.witchAct.harmTarget].deathReason = 'poison';
             }
 
             dead = [...new Set(dead)]; // Unique
@@ -991,52 +1074,142 @@ Instruction: ${instruct}`;
                 await handleDeath(pid);
             }
 
-            gameState.subPhase = 'discuss';
+            if (gameState.dayCount === 1) gameState.subPhase = 'election';
+            else gameState.subPhase = 'discuss';
+
             gameState.discussIdx = 0;
             updateHeader();
         }
 
         async function handleDeath(pid) {
             if (!players[pid].alive) return;
-            kill(pid);
 
-            // Last Words
+            // Last Words (Before killing, so streamLLM works)
             addLog(`🎤 ${pid + 1}号 发表遗言...`, "public");
             const raw = await streamLLM(players[pid], 'day_discuss', "你死了。请发表遗言 (speech)。");
             processAndLogResponse(pid, players[pid].role, raw, true);
 
+            kill(pid);
+
             // Hunter Skill
             if (players[pid].role === '猎人') {
-                addLog(`🔫 猎人死亡，发动技能...`, "public");
-                const hRaw = await streamLLM(players[pid], 'hunter_death', "你死了。发动技能带走一人 (fire) 或放弃 (pass)。");
-                const j = processAndLogResponse(pid, '猎人', hRaw, true);
-
-                if (j) {
-                    if (j.action === 'fire' && j.target !== undefined) {
-                        const target = parseInt(j.target); // already 0-based from processAndLogResponse
-                        if (players[target] && players[target].alive) {
-                            addLog(`🔫 猎人开枪带走了 ${target + 1}号`, "public");
-                            await handleDeath(target);
-                        } else {
-                            addLog(`🔫 猎人试图带走 ${target + 1}号，但目标无效。`, "public");
-                        }
-                    } else if (j.action === 'pass') {
-                        addLog(`🔫 猎人放弃发动技能。`, "public");
-                    } else {
-                        addLog(`🔫 猎人未能发动技能 (指令不清)。`, "public");
-                    }
+                if (players[pid].deathReason === 'poison') {
+                    addLog(`🔫 猎人被毒杀，无法发动技能。`, "public");
                 } else {
-                    addLog(`🔫 猎人未能发动技能 (无响应)。`, "public");
+                    addLog(`🔫 猎人死亡，发动技能...`, "public");
+                    const hRaw = await streamLLM(players[pid], 'hunter_death', "你死了。发动技能带走一人 (fire) 或放弃 (pass)。");
+                    const j = processAndLogResponse(pid, '猎人', hRaw, true);
+
+                    if (j) {
+                        if (j.action === 'fire' && j.target !== undefined) {
+                            const target = parseInt(j.target) - 1;
+                            if (players[target] && players[target].alive) {
+                                addLog(`🔫 猎人开枪带走了 ${target + 1}号`, "public");
+                                await handleDeath(target);
+                            } else {
+                                addLog(`🔫 猎人试图带走 ${target + 1}号，但目标无效。`, "public");
+                            }
+                        } else if (j.action === 'pass') {
+                            addLog(`🔫 猎人放弃发动技能。`, "public");
+                        } else {
+                            addLog(`🔫 猎人未能发动技能 (指令不清)。`, "public");
+                        }
+                    } else {
+                        addLog(`🔫 猎人未能发动技能 (无响应)。`, "public");
+                    }
                 }
             }
         }
 
+        async function runElection() {
+            addLog("=== 警长竞选 ===", "sys");
+            const candidates = [];
+            // 1. Run for Sheriff
+            for (const p of players.filter(x => x.alive)) {
+                const raw = await streamLLM(p, 'sheriff_election', "是否竞选警长？(run/pass)");
+                const j = processAndLogResponse(p.id, p.role, raw, true);
+                if (j && j.action === 'run') candidates.push(p.id);
+            }
+
+            if (candidates.length === 0) {
+                addLog("无人竞选警长。", "public");
+            } else if (candidates.length === 1) {
+                gameState.sheriffId = candidates[0];
+                players[candidates[0]].isSheriff = true;
+                addLog(`${candidates[0] + 1}号 自动当选警长！`, "public");
+            } else {
+                // 2. Vote
+                addLog(`候选人: ${candidates.map(id => id + 1).join(', ')}。请投票。`, "public");
+                let votes = {};
+                const voters = players.filter(p => p.alive && !candidates.includes(p.id));
+
+                if (voters.length === 0) {
+                    addLog("所有人都竞选了，无法投票，警徽流失。", "public");
+                } else {
+                    for (const p of voters) {
+                        const cList = candidates.map(id => `${id + 1}号`).join(', ');
+                        const raw = await streamLLM(p, 'sheriff_vote', `候选人：${cList}。请投票 (vote)。`);
+                        const j = processAndLogResponse(p.id, p.role, raw, true);
+                        if (j && j.target !== undefined) {
+                            const t = parseInt(j.target);
+                            if (candidates.includes(t)) {
+                                votes[t] = (votes[t] || 0) + 1;
+                                addLog(`🗳️ ${p.id + 1}号 投给了 ${t + 1}号`, "public");
+                            }
+                        }
+                    }
+                    // Tally
+                    const s = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+                    console.log("Election Votes:", votes, "Sorted:", s); // Debug Log
+
+                    if (s.length > 0 && (s.length === 1 || s[0][1] > s[1][1])) {
+                        const winner = parseInt(s[0][0]);
+                        gameState.sheriffId = winner;
+                        players[winner].isSheriff = true;
+                        addLog(`${winner + 1}号 当选警长！`, "public");
+                    } else {
+                        addLog("平票或无人投票，警徽流失。", "public");
+                    }
+                }
+            }
+            gameState.subPhase = 'discuss';
+            updateHeader();
+        }
+
         async function runDiscuss() {
             const a = players.filter(p => p.alive);
+            // Sort speakers: Sheriff last
+            if (gameState.sheriffId !== -1) {
+                const sIdx = a.findIndex(p => p.id === gameState.sheriffId);
+                if (sIdx !== -1) {
+                    const sheriff = a.splice(sIdx, 1)[0];
+                    a.push(sheriff);
+                }
+            }
+
             if (gameState.discussIdx < a.length) {
                 const p = a[gameState.discussIdx];
-                const raw = await streamLLM(p, 'day_discuss', "请简短发言。");
-                processAndLogResponse(p.id, p.role, raw, true); // Public log
+                let promptKey = 'day_discuss';
+                if (p.role === '白狼王') promptKey = 'white_wolf_king_discuss';
+
+                const raw = await streamLLM(p, promptKey, "请发言。");
+                const j = processAndLogResponse(p.id, p.role, raw, true); // Public log
+
+                // White Wolf King Self-Destruct
+                if (p.role === '白狼王' && j && j.action === 'self_destruct' && j.target !== undefined) {
+                    const t = parseInt(j.target);
+                    addLog(`💥 白狼王自爆！带走了 ${t + 1}号！`, "public");
+                    kill(p.id); // King dies
+                    if (players[t] && players[t].alive) {
+                        await handleDeath(t);
+                    }
+                    // Skip to night
+                    gameState.subPhase = 'wolf';
+                    gameState.phase = 'night';
+                    updateHeader();
+                    return;
+                }
+
                 gameState.discussIdx++;
             } else gameState.subPhase = 'vote';
             updateHeader();
@@ -1044,22 +1217,39 @@ Instruction: ${instruct}`;
 
         async function runVote() {
             addLog("=== 投票阶段 ===", "sys");
-            let v = {}; const a = players.filter(p => p.alive);
+            let v = {}; const a = players.filter(p => p.alive && p.canVote);
             for (const p of a) {
                 const raw = await streamLLM(p, 'day_vote', "请投票。");
                 const j = processAndLogResponse(p.id, p.role, raw, true);
                 let t = -1;
                 if (j && j.target !== undefined) t = parseInt(j.target);
                 else { const o = a.filter(x => x.id !== p.id); if (o.length) t = o[Math.floor(Math.random() * o.length)].id; } // fallback
-                addLog(`🗳️ ${p.id + 1}号 投给了 ${t + 1}号`, "public");
-                v[t] = (v[t] || 0) + 1;
+
+                let weight = 1;
+                if (p.isSheriff) {
+                    weight = 1.5;
+                    addLog(`🗳️ ${p.id + 1}号(警长) 投给了 ${t + 1}号 (1.5票)`, "public");
+                } else {
+                    addLog(`🗳️ ${p.id + 1}号 投给了 ${t + 1}号`, "public");
+                }
+
+                v[t] = (v[t] || 0) + weight;
             }
             // Tally
             const s = Object.entries(v).sort((a, b) => b[1] - a[1]);
             if (s.length && s[0][1] > (s[1]?.[1] || 0)) {
                 const o = parseInt(s[0][0]);
-                addLog(`${o + 1}号 被公投出局。`, "public");
-                await handleDeath(o);
+
+                // Idiot Reveal Logic
+                if (players[o].role === '白痴' && !players[o].isIdiotRevealed) {
+                    addLog(`${o + 1}号 被公投出局... 等等！`, "public");
+                    addLog(`🤡 ${o + 1}号 翻牌：我是白痴！免疫本次放逐！`, "public");
+                    players[o].isIdiotRevealed = true;
+                    players[o].canVote = false; // Lose vote right
+                } else {
+                    addLog(`${o + 1}号 被公投出局。`, "public");
+                    await handleDeath(o);
+                }
             } else addLog("平票，无人出局。", "public");
 
             gameState.dayCount++;
@@ -1068,30 +1258,82 @@ Instruction: ${instruct}`;
             updateHeader();
         }
 
+        async function runReview() {
+            if (!gameState.reviewRound) gameState.reviewRound = 1;
+            const maxReviewRounds = 2;
+
+            if (gameState.reviewRound > maxReviewRounds) {
+                addLog("=== 复盘结束 ===", "sys");
+                gameState.status = 'ended'; // Final end
+                document.getElementById('autoPlay').checked = false;
+                return;
+            }
+
+            addLog(`=== 赛后复盘 第 ${gameState.reviewRound} 轮 ===`, "sys");
+
+            // Reveal all roles for the prompt
+            const allRoles = players.map(p => `${p.id + 1}号(${p.role})`).join(', ');
+
+            for (const p of players) {
+                // Even dead players speak in review
+                const instruct = `所有玩家身份已公开：${allRoles}。请点评本局游戏，分析胜负原因，或者聊聊你的心路历程。`;
+                const raw = await streamLLM(p, 'game_review', instruct);
+                processAndLogResponse(p.id, p.role, raw, true);
+            }
+
+            gameState.reviewRound++;
+            updateHeader();
+        }
+
         /**
          * 7. HELPERS & UI UTILS
          */
-        function kill(i) { if (players[i]) players[i].alive = false; }
+        function kill(i) {
+            if (players[i] && players[i].alive) {
+                players[i].alive = false;
+                // Lovers Logic
+                if (players[i].isCouple) {
+                    const partnerId = players[i].coupleId;
+                    if (players[partnerId] && players[partnerId].alive) {
+                        addLog(`💔 ${i + 1}号 死了，${partnerId + 1}号 殉情随之而去。`, "public");
+                        kill(partnerId);
+                    }
+                }
+                // Sheriff Transfer Logic (Simplified: Sheriff dies, badge lost for now, or implement transfer later)
+                if (players[i].isSheriff) {
+                    addLog(`👮 警长 ${i + 1}号 死亡，警徽流失（暂未实现移交）。`, "public");
+                    players[i].isSheriff = false;
+                    gameState.sheriffId = -1;
+                }
+            }
+        }
         function gameOver(g) {
-            gameState.status = 'gameover';
+            gameState.status = 'gameover'; // Mark as gameover but continue to review
             const m = g ? "🏆 好人胜利" : "🌙 狼人胜利";
             addLog(m, "sys");
-            document.getElementById('autoPlay').checked = false;
+
+            // Transition to Review
+            gameState.subPhase = 'review';
+            gameState.reviewRound = 1;
+            updateHeader();
+
+            // If auto-play is on, it will continue to review in next gameStep
+            // If not, user can click "Next Step"
         }
         function clearLogs() { document.getElementById('gameLog').innerHTML = ''; }
         function escapeHtml(t) { if (!t) return ""; return t.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">"); }
         function updateHeader() {
-            const m = { 'wolf': '狼人', 'seer': '预言', 'witch': '女巫', 'guard': '守卫', 'discuss': '发言', 'vote': '投票' };
+            const m = { 'cupid': '丘比特', 'wolf': '狼人', 'seer': '预言', 'witch': '女巫', 'guard': '守卫', 'election': '竞选', 'discuss': '发言', 'vote': '投票', 'review': '复盘' };
             document.getElementById('phaseDisplay').innerText = `Day ${gameState.dayCount} · ${m[gameState.subPhase] || ''}`;
         }
-        function getAvatar(r) { return { '狼人': '🐺', '村民': '👱', '预言家': '🔮', '女巫': '🧪', '猎人': '🔫', '守卫': '🛡️' }[r] || '❓'; }
+        function getAvatar(r) { return { '狼人': '🐺', '白狼王': '🐺👑', '村民': '👱', '预言家': '🔮', '女巫': '🧪', '猎人': '🔫', '守卫': '🛡️', '丘比特': '💘', '白痴': '🤡' }[r] || '❓'; }
         function toggleAuto() { const c = document.getElementById('autoPlay'); c.checked = !c.checked; if (c.checked) gameStep(); }
 
         // UI Builders
         function adjustPlayerCount(delta) {
             const current = appConfig.rolesSetup.length;
             const next = current + delta;
-            if (next < 6 || next > 12) return;
+            if (next < 6 || next > 16) return;
 
             if (delta > 0) {
                 appConfig.rolesSetup.push('村民');
@@ -1114,7 +1356,7 @@ Instruction: ${instruct}`;
         <div class="flex gap-1 items-center bg-black/20 p-1 rounded border border-gray-700">
             <span class="text-xs text-gray-500 w-4 text-center">${i + 1}</span>
             <select id="role-${i}" onchange="appConfig.rolesSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-pink-400 border border-gray-600 w-16">
-                ${['狼人', '村民', '预言家', '女巫', '猎人', '守卫'].map(x => `<option value="${x}"${appConfig.rolesSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
+                ${['狼人', '白狼王', '村民', '预言家', '女巫', '猎人', '守卫', '丘比特', '白痴'].map(x => `<option value="${x}"${appConfig.rolesSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
             </select>
             <select id="model-${i}" onchange="appConfig.modelsSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-blue-300 border border-gray-600 flex-1 w-24 truncate">
                 ${availableModels.map(x => `<option value="${x}"${appConfig.modelsSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}

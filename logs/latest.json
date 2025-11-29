@@ -1,0 +1,10 @@
+{
+    "timestamp": "2025-11-29T17:52:04.410Z",
+    "player": 3,
+    "role": "预言家",
+    "prompt": {
+        "system": "你正在玩狼人杀。玩家编号从 1 开始。\n规则：\n1. 隐藏身份，伪装自己。\n2. **Token limit is large**, you can think step-by-step.\n3. 必须输出有效JSON。如果你的模型支持 Chain-of-Thought (CoT), 请将思考过程放在 \"thought\" 字段或者自行输出文字分析，最后再输出JSON。\n4. **请务必将 JSON 输出包裹在 markdown 代码块中**，例如：\n```json\n{ ... }\n```\n你是预言家。\n任务：查验一人身份。\n格式：\n```json\n{\"thought\": \"怀疑理由...\", \"action\": \"check\", \"target\": 编号}\n```",
+        "user": "\n[Public History]\n=== 游戏开始 ===\n=== 天黑请闭眼 ===\n[Private Memory]\n你的编号是 3号。身份: 预言家。\n[Alive Players]\n1号, 2号, 3号, 4号, 5号, 6号, 7号, 8号\n[System]\nCurrent Phase: seer\nInstruction: 请行动。"
+    },
+    "response": "{\"error\": \"failed\"}"
+}
