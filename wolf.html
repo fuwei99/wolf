@@ -342,7 +342,10 @@
          */
         async function init() {
             await loadGlobalSettings();
-            await resetPrompts(false); // Load default prompts initially without saving
+            // Only load default prompts if no prompts are loaded from config
+            if (!appConfig.prompts || Object.keys(appConfig.prompts).length === 0) {
+                await resetPrompts(false);
+            }
             initRoleConfig();
             updatePromptEditorList();
             refreshPresetList();
@@ -358,6 +361,9 @@
                 if (data.modelsSetup) appConfig.modelsSetup = data.modelsSetup;
                 if (data.personasSetup) appConfig.personasSetup = data.personasSetup;
                 else appConfig.personasSetup = Array(appConfig.rolesSetup.length).fill('');
+
+                // Load prompts from config if available, otherwise they will be loaded from default in init()
+                if (data.prompts) appConfig.prompts = data.prompts;
 
                 document.getElementById('apiBase').value = appConfig.apiBase;
                 document.getElementById('apiKey').value = appConfig.apiKey;
@@ -376,7 +382,8 @@
                         apiKey: appConfig.apiKey,
                         rolesSetup: appConfig.rolesSetup,
                         modelsSetup: appConfig.modelsSetup,
-                        personasSetup: appConfig.personasSetup
+                        personasSetup: appConfig.personasSetup,
+                        prompts: appConfig.prompts // Save current prompts to config
                     })
                 });
             } catch (e) { console.error("Failed to save config", e); }
@@ -1114,7 +1121,7 @@ Instruction: ${instruct}`;
                     if (r === '预言家') {
                         const t = parseInt(j.target);
                         const good = players[t].role !== '狼人' && players[t].role !== '白狼王';
-                        p.privateMem.push(`${t}号是${good ? '好人' : '狼人'}`); // Add to Seer memory
+                        p.privateMem.push(`${t + 1}号是${good ? '好人' : '狼人'}`); // Add to Seer memory
                     }
                     if (r === '守卫') gameState.guardLast = parseInt(j.target);
                 }
