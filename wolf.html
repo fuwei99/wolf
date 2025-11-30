@@ -311,7 +311,7 @@
         /**
          * 1. CONFIG & CONSTANTS
          */
-        const DEFAULT_ROLES = ['白狼王', '狼人', '狼人', '狼人', '预言家', '女巫', '猎人', '守卫', '丘比特', '白痴', '村民', '村民', '村民', '村民', '村民', '村民'];
+        const DEFAULT_ROLES = ['白狼王', '狼人', '狼人', '狼人', '预言家', '女巫', '猎人', '守卫', '丘比特', 'Baichi', '村民', '村民', '村民', '村民', '村民', '村民'];
         let appConfig = {
             apiBase: "",
             apiKey: "",
@@ -589,7 +589,7 @@
                 }
                 if (p.role === '白狼王') m += " 你是白狼王，白天可以自爆带人。";
                 if (p.role === '丘比特') m += " 你是丘比特，首夜可以连接两名情侣。";
-                if (p.role === '白痴') m += " 你是白痴，被公投出局可以翻牌免死。";
+                if (p.role === 'Baichi') m += " 你是Baichi，被公投出局可以翻牌免死。";
                 p.privateMem.push(m);
             });
 
@@ -632,7 +632,7 @@
 
             const alive = players.filter(p => p.alive);
             const wolves = alive.filter(p => p.role === '狼人' || p.role === '白狼王');
-            let gods = alive.filter(p => ['预言家', '女巫', '猎人', '守卫', '丘比特', '白痴'].includes(p.role));
+            let gods = alive.filter(p => ['预言家', '女巫', '猎人', '守卫', '丘比特', 'Baichi'].includes(p.role));
             let villagers = alive.filter(p => p.role === '村民');
 
             // --- Third Party Logic ---
@@ -978,9 +978,37 @@ Instruction: ${instruct}`;
                         players[t1].isCouple = true; players[t1].coupleId = t2;
                         players[t2].isCouple = true; players[t2].coupleId = t1;
 
-                        // Inform lovers about each other's role
-                        players[t1].privateMem.push(`💘 你被丘比特连成了情侣。你的伴侣是 ${t2 + 1}号，TA的身份是 ${players[t2].role}。`);
-                        players[t2].privateMem.push(`💘 你被丘比特连成了情侣。你的伴侣是 ${t1 + 1}号，TA的身份是 ${players[t1].role}。`);
+                        // Inform lovers about each other's role AND Cupid's identity
+                        const cupidId = cupid.id + 1;
+                        const p1 = players[t1];
+                        const p2 = players[t2];
+                        const isWolf = p => p.role === '狼人' || p.role === '白狼王';
+
+                        let campMsg = "";
+                        // Third Party: Mixed Couple (Wolf + Good)
+                        if (isWolf(p1) !== isWolf(p2)) {
+                            campMsg = `你现在和 ${t1 + 1}号、${t2 + 1}号、${cupidId}号(丘比特) 属于第三方阵营 (人狼恋)。目标是屠城 (淘汰除你们三人外的所有人)。`;
+                        }
+                        // Wolf Camp: Wolf Couple (Wolf + Wolf)
+                        else if (isWolf(p1) && isWolf(p2)) {
+                            campMsg = `你现在属于狼人阵营 (双狼恋)。丘比特(${cupidId}号) 也是你们的队友。`;
+                        }
+                        // Good Camp: Good Couple (Good + Good)
+                        else {
+                            campMsg = `你现在属于好人阵营 (双好人恋)。`;
+                        }
+
+                        p1.privateMem.push(`💘 你被丘比特(${cupidId}号)连成了情侣。你的伴侣是 ${t2 + 1}号，TA的身份是 ${p2.role}。${campMsg}`);
+                        p2.privateMem.push(`💘 你被丘比特(${cupidId}号)连成了情侣。你的伴侣是 ${t1 + 1}号，TA的身份是 ${p1.role}。${campMsg}`);
+
+                        // Also inform Cupid about the camp
+                        if (isWolf(p1) !== isWolf(p2)) {
+                            cupid.privateMem.push(`💘 你连接了 ${t1 + 1}号(${p1.role}) 和 ${t2 + 1}号(${p2.role})。你们三人现在属于第三方阵营 (人狼恋)。目标是屠城。`);
+                        } else if (isWolf(p1) && isWolf(p2)) {
+                            cupid.privateMem.push(`💘 你连接了 ${t1 + 1}号(${p1.role}) 和 ${t2 + 1}号(${p2.role})。你们现在属于狼人阵营 (双狼恋)。`);
+                        } else {
+                            cupid.privateMem.push(`💘 你连接了 ${t1 + 1}号(${p1.role}) 和 ${t2 + 1}号(${p2.role})。你们现在属于好人阵营 (双好人恋)。`);
+                        }
 
                         gameState.cupidAct = { t1, t2 };
                     }
@@ -1314,9 +1342,9 @@ Instruction: ${instruct}`;
                 const o = parseInt(s[0][0]);
 
                 // Idiot Reveal Logic
-                if (players[o].role === '白痴' && !players[o].isIdiotRevealed) {
+                if (players[o].role === 'Baichi' && !players[o].isIdiotRevealed) {
                     addLog(`${o + 1}号 被公投出局... 等等！`, "public");
-                    addLog(`🤡 ${o + 1}号 翻牌：我是白痴！免疫本次放逐！`, "public");
+                    addLog(`🤡 ${o + 1}号 翻牌：我是Baichi！免疫本次放逐！`, "public");
                     players[o].isIdiotRevealed = true;
                     players[o].canVote = false; // Lose vote right
                 } else {
@@ -1414,7 +1442,7 @@ Instruction: ${instruct}`;
             const m = { 'cupid': '丘比特', 'wolf': '狼人', 'seer': '预言', 'witch': '女巫', 'guard': '守卫', 'election': '竞选', 'discuss': '发言', 'vote': '投票', 'review': '复盘' };
             document.getElementById('phaseDisplay').innerText = `Day ${gameState.dayCount} · ${m[gameState.subPhase] || ''}`;
         }
-        function getAvatar(r) { return { '狼人': '🐺', '白狼王': '🐺👑', '村民': '👱', '预言家': '🔮', '女巫': '🧪', '猎人': '🔫', '守卫': '🛡️', '丘比特': '💘', '白痴': '🤡' }[r] || '❓'; }
+        function getAvatar(r) { return { '狼人': '🐺', '白狼王': '🐺👑', '村民': '👱', '预言家': '🔮', '女巫': '🧪', '猎人': '🔫', '守卫': '🛡️', '丘比特': '💘', 'Baichi': '🤡' }[r] || '❓'; }
         function toggleAuto() { const c = document.getElementById('autoPlay'); c.checked = !c.checked; if (c.checked) gameStep(); }
 
         // UI Builders
@@ -1446,7 +1474,7 @@ Instruction: ${instruct}`;
         <div class="flex gap-1 items-center bg-black/20 p-1 rounded border border-gray-700">
             <span class="text-xs text-gray-500 w-4 text-center">${i + 1}</span>
             <select id="role-${i}" onchange="appConfig.rolesSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-pink-400 border border-gray-600 w-16">
-                ${['狼人', '白狼王', '村民', '预言家', '女巫', '猎人', '守卫', '丘比特', '白痴'].map(x => `<option value="${x}"${appConfig.rolesSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
+                ${['狼人', '白狼王', '村民', '预言家', '女巫', '猎人', '守卫', '丘比特', 'Baichi'].map(x => `<option value="${x}"${appConfig.rolesSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
             </select>
             <select id="model-${i}" onchange="appConfig.modelsSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-blue-300 border border-gray-600 flex-1 w-24 truncate">
                 ${availableModels.map(x => `<option value="${x}"${appConfig.modelsSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
