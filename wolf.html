@@ -329,7 +329,7 @@
             status: 'setup', dayCount: 0, phase: 'night', subPhase: 'init',
             logs: [], settings: { potion: { save: true, harm: true } },
             guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
-            cupidAct: null, sheriffId: -1
+            cupidAct: null, sheriffId: -1, discussIdx: 0, reviewRound: 1, reviewIdx: 0
         };
         let players = [];
         let availableModels = ['gpt-3.5-turbo', 'gpt-4o-mini'];
@@ -521,7 +521,7 @@
                 status: 'setup', dayCount: 0, phase: 'night', subPhase: 'init',
                 logs: [], settings: { potion: { save: true, harm: true } },
                 guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
-                cupidAct: null, sheriffId: -1
+                cupidAct: null, sheriffId: -1, discussIdx: 0, reviewRound: 1, reviewIdx: 0
             };
             players = [];
             historyStack = [];
@@ -547,7 +547,7 @@
                 status: 'playing', dayCount: 1, phase: 'night', subPhase: 'cupid', // Start with Cupid
                 logs: [], settings: { potion: { save: true, harm: true } },
                 guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
-                cupidAct: null, sheriffId: -1
+                cupidAct: null, sheriffId: -1, discussIdx: 0, reviewRound: 1, reviewIdx: 0
             };
             historyStack = [];
             document.getElementById('gameLog').innerHTML = '';
@@ -802,8 +802,12 @@ Instruction: ${instruct}`;
             // Helper to store short memory not the huge thought chain
             const json = parseMixedOutput(text);
             if (!json) return "Acted.";
-            if (json.speech) return `Speech: ${json.speech.substring(0, 20)}...`;
-            if (json.action) return `Action: ${json.action} -> ${json.target}`;
+            if (json.speech) return `Speech: ${json.speech}`;
+            if (json.action) {
+                if (json.target !== undefined) return `Action: ${json.action} -> ${json.target}`;
+                if (json.target1 !== undefined && json.target2 !== undefined) return `Action: ${json.action} -> ${json.target1}, ${json.target2}`;
+                return `Action: ${json.action}`;
+            }
             return "Acted.";
         }
 
@@ -924,6 +928,7 @@ Instruction: ${instruct}`;
                 if (json.speech) userMsg = json.speech;
                 else if (json.action) {
                     if (json.target !== undefined) userMsg = `执行了 ${json.action} -> ${json.target}`;
+                    else if (json.target1 !== undefined && json.target2 !== undefined) userMsg = `执行了 ${json.action} -> ${json.target1}, ${json.target2}`;
                     else userMsg = `执行了 ${json.action}`;
                 }
                 else userMsg = "进行了思考 (无具体行动)";
