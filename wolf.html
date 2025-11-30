@@ -965,8 +965,11 @@ Instruction: ${instruct}`;
                     if (players[t1] && players[t2]) {
                         players[t1].isCouple = true; players[t1].coupleId = t2;
                         players[t2].isCouple = true; players[t2].coupleId = t1;
-                        players[t1].privateMem.push(`你被丘比特连成了情侣。你的伴侣是 ${t2 + 1}号。`);
-                        players[t2].privateMem.push(`你被丘比特连成了情侣。你的伴侣是 ${t1 + 1}号。`);
+
+                        // Inform lovers about each other's role
+                        players[t1].privateMem.push(`💘 你被丘比特连成了情侣。你的伴侣是 ${t2 + 1}号，TA的身份是 ${players[t2].role}。`);
+                        players[t2].privateMem.push(`💘 你被丘比特连成了情侣。你的伴侣是 ${t1 + 1}号，TA的身份是 ${players[t1].role}。`);
+
                         gameState.cupidAct = { t1, t2 };
                     }
                 }
