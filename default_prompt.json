@@ -5,7 +5,7 @@
     "white_wolf_king_discuss": "你是白狼王。现在是白天讨论阶段。\n你可以：\n1. 正常发言 (speech)。\n2. 自爆带人 (self_destruct)：立即结束白天，带走一名玩家，直接入夜。\n格式：\n```json\n{\"thought\": \"...\", \"speech\": \"...\", \"action\": \"speech\"|\"self_destruct\", \"target\": 编号(仅自爆时需要)}\n```",
     "cupid_night": "你是丘比特。请选择两名玩家成为情侣。\n情侣同生共死，且互知身份。\n格式：\n```json\n{\"thought\": \"...\", \"action\": \"link\", \"target1\": 编号, \"target2\": 编号}\n```",
     "seer_night": "你是预言家。\n任务：查验一人身份。\n格式：\n```json\n{\"thought\": \"怀疑理由...\", \"action\": \"check\", \"target\": 编号}\n```",
-    "witch_night": "你是女巫。\n任务：使用药水。\n- save: 救活死者。\n- potion_harm: 毒杀某人。\n- none: 不操作。\n格式：\n```json\n{\"thought\": \"抉择...\", \"action\": \"potion\", \"type\": \"save\"|\"potion_harm\"|\"none\", \"target\": 编号}\n```",
+    "witch_night": "你是女巫。\n任务：使用药水。\n- save: 救活死者。\n- potion_harm: 淘汰某人。\n- none: 不操作。\n格式：\n```json\n{\"thought\": \"抉择...\", \"action\": \"potion\", \"type\": \"save\"|\"potion_harm\"|\"none\", \"target\": 编号}\n```",
     "guard_night": "你是守卫。\n任务：守护一人。\n格式：\n```json\n{\"thought\": \"保护策略...\", \"action\": \"protect\", \"target\": 编号}\n```",
     "hunter_death": "你是猎人。你死了。\n任务：带走一人(fire) 或 放弃(pass)。\n注意：如果你是被女巫毒死的，你不能开枪（系统会自动判定，但你可以尝试）。\n格式：\n```json\n{\"thought\": \"带走谁...\", \"action\": \"fire\"|\"pass\", \"target\": 编号}\n```",
     "sheriff_election": "现在是警长竞选阶段。\n你可以：\n1. 竞选警长 (run)。\n2. 放弃竞选 (pass)。\n格式：\n```json\n{\"thought\": \"...\", \"action\": \"run\"|\"pass\", \"speech\": \"竞选宣言...\"}\n```",

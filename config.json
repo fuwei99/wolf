@@ -3,19 +3,31 @@
     "apiKey": "sk-aHH6IEPEevqtt5BpZZYBvqiNocfJWWtSmXRTZ5CcYKLPDqCf",
     "port": 1069,
     "rolesSetup": [
-        "白狼王",
-        "狼人",
-        "预言家",
         "守卫",
-        "白痴",
-        "村民"
+        "预言家",
+        "狼人",
+        "守卫",
+        "白狼王",
+        "村民",
+        "Baichi",
+        "村民",
+        "女巫",
+        "猎人",
+        "狼人",
+        "丘比特"
     ],
     "modelsSetup": [
         "GeminiCLI/gemini-2.5-pro-nothinking",
-        "GeminiCLI/gemini-2.5-flash-nothinking",
+        "lmarena/gpt-5.1",
+        "GeminiCLI/gemini-3-pro-preview-nothinking",
+        "lmarena/claude-opus-4-5-20251101-thinking-32k",
         "GeminiCLI/gemini-2.5-pro-nothinking",
-        "GeminiCLI/gemini-2.5-flash-nothinking",
-        "GeminiCLI/gemini-2.5-flash-nothinking",
-        "GeminiCLI/gemini-2.5-flash-nothinking"
+        "GeminiCLI/gemini-2.5-pro-nothinking",
+        "GeminiCLI/gemini-3-pro-preview-nothinking",
+        "GeminiCLI/gemini-2.5-pro-nothinking",
+        "lmarena/grok-4.1",
+        "lmarena/qwen3-max-preview",
+        "GeminiCLI/gemini-2.5-pro-nothinking",
+        "ByteDance/Doubao-Seed-1.6"
     ]
 }
