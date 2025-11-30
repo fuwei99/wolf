@@ -521,6 +521,12 @@
             document.getElementById('autoPlay').checked = false;
             isStreaming = false;
 
+            // Clear any pending timeouts
+            let id = window.setTimeout(function () { }, 0);
+            while (id--) {
+                window.clearTimeout(id);
+            }
+
             gameState = {
                 status: 'setup', dayCount: 0, phase: 'night', subPhase: 'init',
                 logs: [], settings: { potion: { save: true, harm: true } },
