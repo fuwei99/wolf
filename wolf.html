@@ -596,7 +596,8 @@
         }
 
         async function gameStep() {
-            if (gameState.status === 'gameover' || isStreaming) return;
+            // Allow step if gameover BUT we are in review phase
+            if ((gameState.status === 'gameover' && gameState.subPhase !== 'review') || gameState.status === 'ended' || isStreaming) return;
 
             pushHistory(); // Snapshot state before moving
 
@@ -610,15 +611,48 @@
             }
             renderGrid();
 
-            if (gameState.status !== 'gameover' && document.getElementById('autoPlay').checked) {
+            if (gameState.status !== 'ended' && document.getElementById('autoPlay').checked) {
                 setTimeout(gameStep, 1500);
             }
         }
 
         async function processPhase() {
-            const wolves = players.filter(p => p.alive && (p.role === '狼人' || p.role === '白狼王'));
-            const gods = players.filter(p => p.alive && ['预言家', '女巫', '猎人', '守卫', '丘比特', '白痴'].includes(p.role));
-            const villagers = players.filter(p => p.alive && p.role === '村民');
+            // If already in review, skip victory check
+            if (gameState.subPhase === 'review') {
+                await runReview();
+                return;
+            }
+
+            const alive = players.filter(p => p.alive);
+            const wolves = alive.filter(p => p.role === '狼人' || p.role === '白狼王');
+            let gods = alive.filter(p => ['预言家', '女巫', '猎人', '守卫', '丘比特', '白痴'].includes(p.role));
+            let villagers = alive.filter(p => p.role === '村民');
+
+            // --- Third Party Logic ---
+            const cupid = players.find(p => p.role === '丘比特');
+            const lovers = players.filter(p => p.isCouple);
+            const isWolf = p => p.role === '狼人' || p.role === '白狼王';
+
+            if (cupid && lovers.length === 2) {
+                const l1 = lovers[0];
+                const l2 = lovers[1];
+
+                // Mixed Couple (Wolf + Good) -> Third Party
+                if (isWolf(l1) !== isWolf(l2)) {
+                    // Win Condition: Slaughter City (Only Third Party members alive)
+                    const thirdPartyIds = [l1.id, l2.id, cupid.id];
+                    const others = alive.filter(p => !thirdPartyIds.includes(p.id));
+                    if (others.length === 0) {
+                        return gameOver(false, "💘 第三方阵营胜利 (丘比特+人狼情侣)！");
+                    }
+                }
+                // Wolf Couple (Wolf + Wolf) -> Cupid joins Wolf Camp
+                else if (isWolf(l1) && isWolf(l2)) {
+                    // Cupid counts as Wolf side, remove from Gods list for victory check
+                    gods = gods.filter(p => p.role !== '丘比特');
+                }
+            }
+            // -------------------------
 
             // Victory Condition: Slaughter the Side (屠边)
             if (wolves.length === 0) return gameOver(true); // Good wins
@@ -630,7 +664,7 @@
                 case 'seer': await runRole('预言家', 'seer_night'); break;
                 case 'guard': await runRole('守卫', 'guard_night'); break;
                 case 'witch': await runWitch(); break;
-                case 'morning': resolveMorning(); break;
+                case 'morning': await resolveMorning(); break;
                 case 'election': await runElection(); break;
                 case 'discuss': await runDiscuss(); break;
                 case 'vote': await runVote(); break;
@@ -642,8 +676,8 @@
          * 5. STREAMING & PARSING (CoT Logic)
          */
         async function streamLLM(player, key, instruct) {
-            // Allow dead players to speak during review
-            if (!player.alive && gameState.subPhase !== 'review') return null;
+            // Allow dead players to speak during review or hunter skill
+            if (!player.alive && gameState.subPhase !== 'review' && key !== 'hunter_death') return null;
 
             document.getElementById('activePlayerName').innerText = `${player.id + 1}号`;
             const card = document.getElementById(`card-${player.id}`);
@@ -778,39 +812,62 @@ Instruction: ${instruct}`;
          */
         function parseMixedOutput(text) {
             if (typeof text !== 'string') return null;
-            try {
-                // 0. Try to extract from markdown code blocks (find ALL, use LAST valid)
-                const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/g;
-                const matches = [...text.matchAll(codeBlockRegex)];
 
-                if (matches.length > 0) {
-                    // Iterate backwards to find the last valid JSON
-                    for (let i = matches.length - 1; i >= 0; i--) {
-                        try {
-                            return JSON.parse(matches[i][1]);
-                        } catch (e) {
-                            // Continue to previous match
+            // Helper to sanitize newlines inside strings (common LLM error)
+            const sanitize = (str) => {
+                return str.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
+                    return match.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+                });
+            };
+
+            // 1. Try Code Blocks First
+            const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/g;
+            const matches = [...text.matchAll(codeBlockRegex)];
+            if (matches.length > 0) {
+                for (let i = matches.length - 1; i >= 0; i--) {
+                    try { return JSON.parse(matches[i][1]); } catch (e) {
+                        try { return JSON.parse(sanitize(matches[i][1])); } catch (e2) { }
+                    }
+                }
+            }
+
+            // 2. Robust JSON Extractor (State Machine)
+            // Finds all top-level balanced {} blocks, handling strings and escapes
+            const candidates = [];
+            let braceStack = 0;
+            let startIndex = -1;
+            let inString = false;
+            let isEscaped = false;
+
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+
+                if (isEscaped) { isEscaped = false; continue; }
+                if (char === '\\') { isEscaped = true; continue; }
+                if (char === '"') { inString = !inString; continue; }
+
+                if (!inString) {
+                    if (char === '{') {
+                        if (braceStack === 0) startIndex = i;
+                        braceStack++;
+                    } else if (char === '}') {
+                        braceStack--;
+                        if (braceStack === 0 && startIndex !== -1) {
+                            candidates.push(text.substring(startIndex, i + 1));
+                            startIndex = -1;
                         }
                     }
                 }
+            }
 
-                // 1. Fallback: Try to find last JSON object in raw text
-                const firstBrace = text.indexOf('{');
-                const lastBrace = text.lastIndexOf('}');
-                if (firstBrace !== -1 && lastBrace !== -1) {
-                    // Try to parse the whole block first
-                    const potentialJson = text.substring(firstBrace, lastBrace + 1);
-                    try {
-                        return JSON.parse(potentialJson);
-                    } catch (e) {
-                        // If that fails, maybe there are multiple JSONs concatenated?
-                        // Let's try to find the *last* valid JSON object by scanning backwards
-                        // This is complex, so for now we stick to the simple extraction.
-                        // A more robust way would be to use a stack-based parser, but let's hope the code block fix covers 99% cases.
-                    }
+            // Try to parse candidates from last to first (prefer latest output)
+            for (let i = candidates.length - 1; i >= 0; i--) {
+                try { return JSON.parse(candidates[i]); } catch (e) {
+                    try { return JSON.parse(sanitize(candidates[i])); } catch (e2) { }
                 }
-                return null;
-            } catch (e) { return null; }
+            }
+
+            return null;
         }
 
         function addLog(content, type, thoughtContent = null, role = null) {
@@ -848,6 +905,7 @@ Instruction: ${instruct}`;
         }
 
         function processAndLogResponse(playerId, roleName, rawText, isPublic) {
+            if (!rawText) return null;
             let json = parseMixedOutput(rawText);
             let thought = null;
 
@@ -1102,7 +1160,7 @@ Instruction: ${instruct}`;
 
                     if (j) {
                         if (j.action === 'fire' && j.target !== undefined) {
-                            const target = parseInt(j.target) - 1;
+                            const target = parseInt(j.target);
                             if (players[target] && players[target].alive) {
                                 addLog(`🔫 猎人开枪带走了 ${target + 1}号`, "public");
                                 await handleDeath(target);
@@ -1260,8 +1318,16 @@ Instruction: ${instruct}`;
 
         async function runReview() {
             if (!gameState.reviewRound) gameState.reviewRound = 1;
+            if (gameState.reviewIdx === undefined) gameState.reviewIdx = 0;
             const maxReviewRounds = 2;
 
+            // Check if round completed
+            if (gameState.reviewIdx >= players.length) {
+                gameState.reviewIdx = 0;
+                gameState.reviewRound++;
+            }
+
+            // Check if all rounds completed
             if (gameState.reviewRound > maxReviewRounds) {
                 addLog("=== 复盘结束 ===", "sys");
                 gameState.status = 'ended'; // Final end
@@ -1269,19 +1335,25 @@ Instruction: ${instruct}`;
                 return;
             }
 
-            addLog(`=== 赛后复盘 第 ${gameState.reviewRound} 轮 ===`, "sys");
+            if (gameState.reviewIdx === 0) {
+                addLog(`=== 赛后复盘 第 ${gameState.reviewRound} 轮 ===`, "sys");
+            }
 
             // Reveal all roles for the prompt
             const allRoles = players.map(p => `${p.id + 1}号(${p.role})`).join(', ');
+            const p = players[gameState.reviewIdx];
 
-            for (const p of players) {
+            try {
                 // Even dead players speak in review
                 const instruct = `所有玩家身份已公开：${allRoles}。请点评本局游戏，分析胜负原因，或者聊聊你的心路历程。`;
                 const raw = await streamLLM(p, 'game_review', instruct);
                 processAndLogResponse(p.id, p.role, raw, true);
+            } catch (e) {
+                console.error(`Player ${p.id} review failed:`, e);
+                addLog(`${p.id + 1}号 似乎不想说话 (连接失败或输出异常)。`, "public");
             }
 
-            gameState.reviewRound++;
+            gameState.reviewIdx++;
             updateHeader();
         }
 
@@ -1307,14 +1379,15 @@ Instruction: ${instruct}`;
                 }
             }
         }
-        function gameOver(g) {
+        function gameOver(g, msg) {
             gameState.status = 'gameover'; // Mark as gameover but continue to review
-            const m = g ? "🏆 好人胜利" : "🌙 狼人胜利";
+            const m = msg ? msg : (g ? "🏆 好人胜利" : "🌙 狼人胜利");
             addLog(m, "sys");
 
             // Transition to Review
             gameState.subPhase = 'review';
             gameState.reviewRound = 1;
+            gameState.reviewIdx = 0; // Reset index
             updateHeader();
 
             // If auto-play is on, it will continue to review in next gameStep
