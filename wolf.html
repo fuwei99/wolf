@@ -318,7 +318,8 @@
             maxRetries: 3,
             prompts: {}, // Will load from server
             rolesSetup: [...DEFAULT_ROLES].slice(0, 8), // Default 8 players
-            modelsSetup: Array(8).fill('gpt-3.5-turbo')
+            modelsSetup: Array(8).fill('gpt-3.5-turbo'),
+            personasSetup: Array(8).fill('')
         };
 
         // History for Undo
@@ -355,6 +356,8 @@
                 appConfig.apiKey = data.apiKey;
                 if (data.rolesSetup) appConfig.rolesSetup = data.rolesSetup;
                 if (data.modelsSetup) appConfig.modelsSetup = data.modelsSetup;
+                if (data.personasSetup) appConfig.personasSetup = data.personasSetup;
+                else appConfig.personasSetup = Array(appConfig.rolesSetup.length).fill('');
 
                 document.getElementById('apiBase').value = appConfig.apiBase;
                 document.getElementById('apiKey').value = appConfig.apiKey;
@@ -372,7 +375,8 @@
                         apiBase: appConfig.apiBase,
                         apiKey: appConfig.apiKey,
                         rolesSetup: appConfig.rolesSetup,
-                        modelsSetup: appConfig.modelsSetup
+                        modelsSetup: appConfig.modelsSetup,
+                        personasSetup: appConfig.personasSetup
                     })
                 });
             } catch (e) { console.error("Failed to save config", e); }
@@ -558,9 +562,11 @@
             // 1. Collect Config
             for (let i = 0; i < count; i++) {
                 const r = document.getElementById(`role-${i}`).value;
+                const persona = document.getElementById(`persona-${i}`).value;
                 if (r === '狼人' || r === '白狼王') w.push(i);
                 players.push({
                     id: i, role: r, model: document.getElementById(`model-${i}`).value,
+                    persona: persona,
                     alive: true, privateMem: [], avatar: getAvatar(r),
                     isSheriff: false, isCouple: false, coupleId: -1, isIdiotRevealed: false, canVote: true, deathReason: null
                 });
@@ -576,6 +582,7 @@
             // 3. Init Memory
             players.forEach(p => {
                 let m = `你的编号是 ${p.id + 1}号。身份: ${p.role}。`;
+                if (p.persona) m += ` 你的性格/人设: ${p.persona}。请在发言中扮演这个角色。`;
                 if (p.role === '狼人' || p.role === '白狼王') {
                     const mates = w.filter(x => x !== p.id).map(x => `${x + 1}号`).join(', ');
                     m += ` 队友: ${mates || '无'}。`;
@@ -1419,9 +1426,11 @@ Instruction: ${instruct}`;
             if (delta > 0) {
                 appConfig.rolesSetup.push('村民');
                 appConfig.modelsSetup.push(availableModels[0] || 'gpt-3.5-turbo');
+                appConfig.personasSetup.push('');
             } else {
                 appConfig.rolesSetup.pop();
                 appConfig.modelsSetup.pop();
+                appConfig.personasSetup.pop();
             }
             initRoleConfig();
         }
@@ -1442,6 +1451,7 @@ Instruction: ${instruct}`;
             <select id="model-${i}" onchange="appConfig.modelsSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-blue-300 border border-gray-600 flex-1 w-24 truncate">
                 ${availableModels.map(x => `<option value="${x}"${appConfig.modelsSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
             </select>
+            <input type="text" id="persona-${i}" placeholder="性格/人设" onchange="appConfig.personasSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-gray-300 border border-gray-600 w-20" value="${appConfig.personasSetup?.[i] || ''}">
         </div>`;
             }
         }
