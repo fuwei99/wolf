@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 狼人杀 - 完整功能版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e2e;
+            --accent: #ff0055;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding-bottom: 120px;
+        }
+
+        /* Animations */
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        .cursor::after {
+            content: '▋';
+            animation: blink 1s infinite;
+            color: var(--accent);
+            margin-left: 2px;
+        }
+
+        .role-card {
+            transition: all 0.3s;
+            border: 1px solid #333;
+            overflow: hidden;
+        }
+
+        .role-card.active {
+            border-color: #4cc9f0;
+            box-shadow: 0 0 15px rgba(76, 201, 240, 0.3);
+            transform: scale(1.02);
+            z-index: 10;
+        }
+
+        .role-card.dead {
+            opacity: 0.4;
+            filter: grayscale(100%);
+            border-color: #333;
+            background: #000;
+        }
+
+        .role-card.dead span {
+            text-decoration: line-through;
+        }
+
+        /* Logs & Thoughts */
+        .log-container {
+            mask-image: linear-gradient(to bottom, transparent, black 2%);
+            -webkit-mask-image: linear-gradient(to bottom, transparent, black 2%);
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            font-size: 0.85rem;
+            line-height: 1.5;
+            border-left: 3px solid #555;
+        }
+
+        .log-public {
+            border-color: #f72585;
+        }
+
+        .log-private {
+            border-color: #4cc9f0;
+            background: rgba(76, 201, 240, 0.05);
+        }
+
+        .log-sys {
+            border-color: #ffe600;
+            color: #ffe600;
+            font-weight: bold;
+            text-align: center;
+            background: rgba(255, 230, 0, 0.05);
+        }
+
+        /* Folded Thoughts */
+        details.thought-bubble {
+            margin-bottom: 4px;
+            border: 1px dashed #444;
+            border-radius: 4px;
+            padding: 4px;
+            background: #00000030;
+        }
+
+        details.thought-bubble summary {
+            cursor: pointer;
+            font-size: 0.7rem;
+            color: #888;
+            font-family: monospace;
+            outline: none;
+            user-select: none;
+        }
+
+        details.thought-bubble summary:hover {
+            color: #aaa;
+        }
+
+        .thought-content {
+            color: #aaa;
+            font-size: 0.75rem;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin-top: 4px;
+            border-top: 1px solid #333;
+            padding-top: 4px;
+        }
+
+        /* Modals */
+        .modal {
+            transition: opacity 0.2s;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 100;
+        }
+
+        .modal.active {
+            pointer-events: auto;
+            opacity: 1;
+        }
+
+        .btn-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            background: #1f2937;
+            color: white;
+            border: 1px solid #374151;
+        }
+
+        .btn-icon:active {
+            transform: scale(0.95);
+        }
+
+        /* Streaming Box */
+        .think-text {
+            color: #6b7280;
+            font-style: italic;
+        }
+
+        .json-text {
+            color: #4ade80;
+        }
+    </style>
+</head>
+
+<body class="text-sm antialiased select-none">
+
+    <!-- Top Bar -->
+    <div
+        class="p-2 bg-gray-900/95 backdrop-blur fixed top-0 w-full z-50 border-b border-gray-800 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <button onclick="resetGame()"
+                class="btn-icon text-red-400 border-red-900 bg-red-900/10 h-8 w-16 text-xs font-bold gap-1">
+                <span>🔄</span>重开
+            </button>
+            <div class="flex flex-col">
+                <h1 class="font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-purple-500">AI 狼人杀
+                    Pro+</h1>
+                <span id="phaseDisplay" class="text-[9px] text-gray-400 font-mono leading-none">准备中</span>
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="undoStep()" id="btnUndo"
+                class="btn-icon text-yellow-400 border-yellow-900 hover:bg-yellow-900/20">↩️</button>
+            <button onclick="openSaveModal()"
+                class="btn-icon text-green-400 border-green-900 hover:bg-green-900/20">💾</button>
+            <button onclick="openLoadModal()"
+                class="btn-icon text-blue-400 border-blue-900 hover:bg-blue-900/20">📂</button>
+            <button onclick="toggleSettings()" class="btn-icon text-gray-300 hover:bg-gray-700">⚙️</button>
+        </div>
+    </div>
+
+    <div class="pt-14 px-2">
+        <!-- Action Bar -->
+        <div class="flex gap-2 mb-3">
+            <button id="btnStart" onclick="startGame()"
+                class="flex-1 bg-green-700 hover:bg-green-600 py-3 rounded font-bold shadow text-white transition transform active:scale-95">开始新游戏</button>
+            <button id="btnStep" onclick="gameStep()" disabled
+                class="flex-1 bg-indigo-600 hover:bg-indigo-500 py-3 rounded font-bold text-white disabled:opacity-20 disabled:cursor-not-allowed transition active:scale-95">下一步</button>
+            <div class="flex items-center justify-center px-3 bg-gray-800 rounded text-xs border border-gray-700"
+                onclick="toggleAuto()">
+                <input type="checkbox" id="autoPlay" class="pointer-events-none w-4 h-4 accent-pink-500">
+                <span class="ml-1 font-bold text-gray-300">自动</span>
+            </div>
+        </div>
+
+        <!-- Stream Output -->
+        <div class="mb-4 relative group">
+            <div class="flex justify-between text-[10px] text-gray-400 mb-1 pl-1 uppercase tracking-widest">
+                <span>👁️ 实时思维流 (<span id="activePlayerName">...</span>)</span>
+                <span id="retryIndicator" class="text-yellow-500 hidden blink">⚠️ 网络重试中...</span>
+            </div>
+            <div id="streamingOutput"
+                class="bg-[#0b0b12] border border-[#2d2d44] shadow-inner min-h-[100px] max-h-[180px] overflow-y-auto rounded-lg p-3 text-xs font-mono leading-relaxed">
+                <span class="text-gray-600">等待游戏开始...</span>
+            </div>
+        </div>
+
+        <!-- Players -->
+        <div id="playersGrid" class="grid grid-cols-4 gap-2 mb-4 transition-all"></div>
+
+        <!-- Logs -->
+        <div class="flex justify-between items-end mb-2 px-1">
+            <h3 class="font-bold text-gray-400 text-xs uppercase tracking-wider">上帝日志</h3>
+            <button onclick="clearLogs()" class="text-[10px] text-gray-600 hover:text-gray-300">清空</button>
+        </div>
+        <div id="gameLog"
+            class="log-container flex flex-col-reverse h-[35vh] overflow-y-auto bg-gray-900/50 rounded-lg p-2 border border-gray-800/50">
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div class="bg-gray-800 w-[90%] max-w-md h-[80vh] rounded-xl border border-gray-700 flex flex-col shadow-2xl">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 rounded-t-xl">
+                <h2 class="font-bold text-white">设置</h2>
+                <button onclick="toggleSettings()" class="text-2xl text-gray-400">&times;</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                <!-- API -->
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-pink-400 uppercase">API Config</label>
+                    <input type="text" id="apiBase" onchange="saveGlobalSettings()" placeholder="Base URL"
+                        class="w-full bg-black/30 border border-gray-600 rounded p-2 text-xs text-white font-mono">
+                    <input type="password" id="apiKey" onchange="saveGlobalSettings()" placeholder="API Key"
+                        class="w-full bg-black/30 border border-gray-600 rounded p-2 text-xs text-white font-mono">
+                    <button onclick="fetchModels()"
+                        class="w-full bg-gray-700 text-xs py-2 rounded hover:bg-gray-600">刷新模型列表</button>
+                </div>
+                <div class="border-t border-gray-700 my-2"></div>
+                <!-- Prompt -->
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-blue-400 uppercase">Prompt Editor</label>
+
+                    <!-- Preset Controls -->
+                    <div class="flex gap-1 mb-2">
+                        <select id="presetSelect"
+                            class="bg-black/30 border border-gray-600 rounded p-1 text-xs text-gray-300 flex-1">
+                            <option value="">-- 选择预设 --</option>
+                        </select>
+                        <button onclick="loadPreset()"
+                            class="btn-icon w-8 h-8 text-blue-400 border-blue-900">📂</button>
+                        <button onclick="savePreset()"
+                            class="btn-icon w-8 h-8 text-green-400 border-green-900">💾</button>
+                        <button onclick="deletePreset()"
+                            class="btn-icon w-8 h-8 text-red-400 border-red-900">🗑️</button>
+                    </div>
+
+                    <select id="promptSelect" onchange="loadPromptToEdit()"
+                        class="w-full bg-black/30 border border-gray-600 rounded p-1 text-xs text-gray-300 mb-1"></select>
+                    <textarea id="promptText" onchange="saveCurrentPrompt()"
+                        class="w-full h-32 bg-black/30 border border-gray-600 rounded p-2 text-[10px] text-gray-300 font-mono leading-relaxed"></textarea>
+                    <button onclick="resetPrompts()"
+                        class="w-full border border-red-900 text-red-400 text-xs py-2 rounded hover:bg-red-900/20">重置为默认
+                        Prompt</button>
+                </div>
+                <div class="border-t border-gray-700 my-2"></div>
+                <!-- Role Config -->
+                <div class="flex justify-between items-center mb-2">
+                    <label class="text-xs font-bold text-green-400 uppercase">Role Config (<span
+                            id="playerCountDisplay">8</span>)</label>
+                    <div class="flex gap-1">
+                        <button onclick="adjustPlayerCount(-1)"
+                            class="px-2 py-1 bg-gray-700 rounded text-xs hover:bg-gray-600">-</button>
+                        <button onclick="adjustPlayerCount(1)"
+                            class="px-2 py-1 bg-gray-700 rounded text-xs hover:bg-gray-600">+</button>
+                    </div>
+                </div>
+                <div id="roleConfigList" class="space-y-1"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load/Save Modal -->
+    <div id="loadModal" class="modal fixed inset-0 flex items-center justify-center bg-black/90 backdrop-blur z-[110]">
+        <div class="bg-gray-900 w-[85%] max-w-sm rounded-xl border border-gray-700 p-4 shadow-2xl">
+            <h2 class="font-bold text-white mb-4 flex justify-between">
+                <span>存档列表</span>
+                <button onclick="closeLoadModal()" class="text-gray-400">&times;</button>
+            </h2>
+            <button onclick="saveNewSlot()" id="btnSaveNew"
+                class="w-full bg-green-800/50 border border-green-600 text-green-100 py-2 rounded mb-3 text-xs flex justify-center items-center gap-2">
+                <span>➕</span> 新建存档
+            </button>
+            <div id="saveSlotList" class="max-h-[60vh] overflow-y-auto space-y-2"></div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 1. CONFIG & CONSTANTS
+         */
+        const DEFAULT_ROLES = ['白狼王', '狼人', '狼人', '狼人', '预言家', '女巫', '猎人', '守卫', '丘比特', 'Baichi', '村民', '村民', '村民', '村民', '村民', '村民'];
+        let appConfig = {
+            apiBase: "",
+            apiKey: "",
+            maxRetries: 3,
+            prompts: {}, // Will load from server
+            rolesSetup: [...DEFAULT_ROLES].slice(0, 8), // Default 8 players
+            modelsSetup: Array(8).fill('gpt-3.5-turbo'),
+            personasSetup: Array(8).fill('')
+        };
+
+        // History for Undo
+        let historyStack = [];
+
+        // Current State
+        let gameState = {
+            status: 'setup', dayCount: 0, phase: 'night', subPhase: 'init',
+            logs: [], settings: { potion: { save: true, harm: true } },
+            guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
+            cupidAct: null, sheriffId: -1, discussIdx: 0, reviewRound: 1, reviewIdx: 0
+        };
+        let players = [];
+        let availableModels = ['gpt-3.5-turbo', 'gpt-4o-mini'];
+        let isStreaming = false;
+        let hasStorage = false;
+
+        /**
+         * 2. CORE INIT
+         */
+        async function init() {
+            await loadGlobalSettings();
+            // Only load default prompts if no prompts are loaded from config
+            if (!appConfig.prompts || Object.keys(appConfig.prompts).length === 0) {
+                await resetPrompts(false);
+            }
+            initRoleConfig();
+            updatePromptEditorList();
+            refreshPresetList();
+        }
+
+        async function loadGlobalSettings() {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                appConfig.apiBase = data.apiBase;
+                appConfig.apiKey = data.apiKey;
+                if (data.rolesSetup) appConfig.rolesSetup = data.rolesSetup;
+                if (data.modelsSetup) appConfig.modelsSetup = data.modelsSetup;
+                if (data.personasSetup) appConfig.personasSetup = data.personasSetup;
+                else appConfig.personasSetup = Array(appConfig.rolesSetup.length).fill('');
+
+                // Load prompts from config if available, otherwise they will be loaded from default in init()
+                if (data.prompts) appConfig.prompts = data.prompts;
+
+                document.getElementById('apiBase').value = appConfig.apiBase;
+                document.getElementById('apiKey').value = appConfig.apiKey;
+            } catch (e) { console.error("Failed to load config", e); }
+        }
+
+        async function saveGlobalSettings() {
+            appConfig.apiBase = document.getElementById('apiBase').value;
+            appConfig.apiKey = document.getElementById('apiKey').value;
+            try {
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        apiBase: appConfig.apiBase,
+                        apiKey: appConfig.apiKey,
+                        rolesSetup: appConfig.rolesSetup,
+                        modelsSetup: appConfig.modelsSetup,
+                        personasSetup: appConfig.personasSetup,
+                        prompts: appConfig.prompts // Save current prompts to config
+                    })
+                });
+            } catch (e) { console.error("Failed to save config", e); }
+        }
+
+        /**
+         * 3. SAVE / LOAD / UNDO
+         */
+        function pushHistory() {
+            // Save snapshot before change
+            const snapshot = JSON.stringify({ gameState, players });
+            historyStack.push(snapshot);
+            if (historyStack.length > 20) historyStack.shift(); // Max 20 steps
+
+            // Auto Save to latest
+            performSave('autosave');
+        }
+
+        function undoStep() {
+            if (historyStack.length === 0) return alert("无法再回退了");
+            const prev = JSON.parse(historyStack.pop());
+            gameState = prev.gameState;
+            players = prev.players;
+
+            // Refresh UI
+            document.getElementById('gameLog').innerHTML = '';
+            gameState.logs.forEach(l => addLogToDom(l));
+            renderGrid();
+            updateHeader();
+            addLog("↩️ 时光倒流，回到了上一步。", "sys");
+        }
+
+        function openSaveModal() {
+            document.getElementById('loadModal').classList.add('active');
+            document.getElementById('btnSaveNew').style.display = 'flex';
+            renderSaveList(true); // Show save mode
+        }
+
+        function openLoadModal() {
+            document.getElementById('loadModal').classList.add('active');
+            document.getElementById('btnSaveNew').style.display = 'none';
+            renderSaveList(false); // Show load mode
+        }
+
+        function closeLoadModal() {
+            document.getElementById('loadModal').classList.remove('active');
+        }
+
+        async function renderSaveList(isSaveMode) {
+            const list = document.getElementById('saveSlotList');
+            list.innerHTML = '<div class="text-gray-500 text-center">加载中...</div>';
+
+            try {
+                const res = await fetch('/api/saves');
+                const files = await res.json();
+                list.innerHTML = '';
+
+                files.forEach(f => {
+                    createSlotUI(list, f, f, isSaveMode);
+                });
+
+                if (files.length === 0) {
+                    list.innerHTML = '<div class="text-gray-500 text-center">暂无存档</div>';
+                }
+            } catch (e) {
+                list.innerHTML = '<div class="text-red-500 text-center">加载失败</div>';
+            }
+        }
+
+        function createSlotUI(container, filename, label, isSaveMode) {
+            const div = document.createElement('div');
+            div.className = "bg-gray-800 p-2 rounded border border-gray-700 flex justify-between items-center";
+
+            const btn = document.createElement('button');
+            btn.className = "text-xs text-left flex-1 text-gray-300 hover:text-white";
+            btn.innerText = label;
+
+            if (isSaveMode) {
+                btn.onclick = () => { if (confirm("覆盖此存档?")) performSave(filename); };
+            } else {
+                btn.onclick = () => performLoad(filename);
+            }
+
+            const del = document.createElement('button');
+            del.className = "ml-2 text-red-500 px-2 hover:text-red-400 text-xs";
+            del.innerText = "🗑️";
+            del.onclick = async (e) => {
+                e.stopPropagation();
+                if (confirm("确定删除?")) {
+                    await fetch(`/api/saves/${filename}`, { method: 'DELETE' });
+                    renderSaveList(isSaveMode);
+                }
+            };
+
+            div.appendChild(btn);
+            div.appendChild(del);
+            container.appendChild(div);
+        }
+
+        function saveNewSlot() {
+            const name = prompt("请输入存档名称:", `save_${Date.now()}`);
+            if (name) performSave(name);
+        }
+
+        async function performSave(filename) {
+            const data = { gameState, players };
+            try {
+                await fetch(`/api/saves/${filename}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                closeLoadModal();
+                // alert("存档成功!"); // Disable alert for autosave
+                if (filename !== 'autosave') alert("存档成功!");
+            } catch (e) { if (filename !== 'autosave') alert("存档失败"); }
+        }
+
+        async function performLoad(filename) {
+            try {
+                const res = await fetch(`/api/saves/${filename}`);
+                if (!res.ok) throw new Error("Load failed");
+                const d = await res.json();
+
+                historyStack = [];
+                gameState = d.gameState;
+                players = d.players;
+
+                document.getElementById('gameLog').innerHTML = '';
+                gameState.logs.forEach(l => addLogToDom(l));
+                renderGrid();
+                updateHeader();
+                document.getElementById('btnStart').classList.add('hidden');
+                document.getElementById('btnStep').disabled = false;
+
+                closeLoadModal();
+                addLog(`📂 读档成功: ${filename}`, "sys");
+            } catch (e) { alert("读档失败"); }
+        }
+
+        function resetGame() {
+            document.getElementById('autoPlay').checked = false;
+            isStreaming = false;
+
+            // Clear any pending timeouts
+            let id = window.setTimeout(function () { }, 0);
+            while (id--) {
+                window.clearTimeout(id);
+            }
+
+            gameState = {
+                status: 'setup', dayCount: 0, phase: 'night', subPhase: 'init',
+                logs: [], settings: { potion: { save: true, harm: true } },
+                guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
+                cupidAct: null, sheriffId: -1, discussIdx: 0, reviewRound: 1, reviewIdx: 0
+            };
+            players = [];
+            historyStack = [];
+
+            document.getElementById('gameLog').innerHTML = '';
+            document.getElementById('playersGrid').innerHTML = '';
+            document.getElementById('phaseDisplay').innerText = '准备中';
+            document.getElementById('activePlayerName').innerText = '...';
+            document.getElementById('streamingOutput').innerHTML = '<span class="text-gray-600">等待游戏开始...</span>';
+
+            document.getElementById('btnStart').classList.remove('hidden');
+            document.getElementById('btnStep').disabled = true;
+
+            addLog("=== 游戏已重置 ===", "sys");
+        }
+
+        /**
+         * 4. GAME ENGINE
+         */
+        function startGame() {
+            players = [];
+            gameState = {
+                status: 'playing', dayCount: 1, phase: 'night', subPhase: 'cupid', // Start with Cupid
+                logs: [], settings: { potion: { save: true, harm: true } },
+                guardLast: -1, nightTarget: -1, witchAct: { save: false, harmTarget: -1 },
+                cupidAct: null, sheriffId: -1, discussIdx: 0, reviewRound: 1, reviewIdx: 0
+            };
+            historyStack = [];
+            document.getElementById('gameLog').innerHTML = '';
+
+            const count = appConfig.rolesSetup.length;
+            const w = [];
+
+            // 1. Collect Config
+            for (let i = 0; i < count; i++) {
+                const r = document.getElementById(`role-${i}`).value;
+                const persona = document.getElementById(`persona-${i}`).value;
+                if (r === '狼人' || r === '白狼王') w.push(i);
+                players.push({
+                    id: i, role: r, model: document.getElementById(`model-${i}`).value,
+                    persona: persona,
+                    alive: true, privateMem: [], avatar: getAvatar(r),
+                    isSheriff: false, isCouple: false, coupleId: -1, isIdiotRevealed: false, canVote: true, deathReason: null
+                });
+            }
+
+            // 2. Validation
+            const good = players.filter(p => p.role !== '狼人' && p.role !== '白狼王');
+            if (w.length < 1 || good.length < 1) {
+                alert("配置错误：至少需要 1 个狼人和 1 个好人！");
+                return;
+            }
+
+            // 3. Init Memory
+            players.forEach(p => {
+                let m = `你的编号是 ${p.id + 1}号。身份: ${p.role}。`;
+                if (p.persona) m += ` 你的性格/人设: ${p.persona}。请在发言中扮演这个角色。`;
+                if (p.role === '狼人' || p.role === '白狼王') {
+                    const mates = w.filter(x => x !== p.id).map(x => `${x + 1}号`).join(', ');
+                    m += ` 队友: ${mates || '无'}。`;
+                }
+                if (p.role === '白狼王') m += " 你是白狼王，白天可以自爆带人。";
+                if (p.role === '丘比特') m += " 你是丘比特，首夜可以连接两名情侣。";
+                if (p.role === 'Baichi') m += " 你是Baichi，被公投出局可以翻牌免死。";
+                p.privateMem.push(m);
+            });
+
+            renderGrid();
+            addLog("=== 游戏开始 ===", "sys");
+            document.getElementById('btnStart').classList.add('hidden');
+            document.getElementById('btnStep').disabled = false;
+            updateHeader();
+            pushHistory();
+            if (document.getElementById('autoPlay').checked) gameStep();
+        }
+
+        async function gameStep() {
+            // Allow step if gameover BUT we are in review phase
+            if ((gameState.status === 'gameover' && gameState.subPhase !== 'review') || gameState.status === 'ended' || isStreaming) return;
+
+            pushHistory(); // Snapshot state before moving
+
+            try {
+                await processPhase();
+            } catch (e) {
+                console.error(e);
+                addLog(`❌ 错误: ${e.message}`, "sys");
+                isStreaming = false;
+                document.getElementById('autoPlay').checked = false;
+            }
+            renderGrid();
+
+            if (gameState.status !== 'ended' && document.getElementById('autoPlay').checked) {
+                setTimeout(gameStep, 1500);
+            }
+        }
+
+        async function processPhase() {
+            // If already in review, skip victory check
+            if (gameState.subPhase === 'review') {
+                await runReview();
+                return;
+            }
+
+            const alive = players.filter(p => p.alive);
+            const wolves = alive.filter(p => p.role === '狼人' || p.role === '白狼王');
+            let gods = alive.filter(p => ['预言家', '女巫', '猎人', '守卫', '丘比特', 'Baichi'].includes(p.role));
+            let villagers = alive.filter(p => p.role === '村民');
+
+            // --- Third Party Logic ---
+            const cupid = players.find(p => p.role === '丘比特');
+            const lovers = players.filter(p => p.isCouple);
+            const isWolf = p => p.role === '狼人' || p.role === '白狼王';
+
+            if (cupid && lovers.length === 2) {
+                const l1 = lovers[0];
+                const l2 = lovers[1];
+
+                // Mixed Couple (Wolf + Good) -> Third Party
+                if (isWolf(l1) !== isWolf(l2)) {
+                    // Win Condition: Slaughter City (Only Third Party members alive)
+                    const thirdPartyIds = [l1.id, l2.id, cupid.id];
+                    const others = alive.filter(p => !thirdPartyIds.includes(p.id));
+                    if (others.length === 0) {
+                        return gameOver(false, "💘 第三方阵营胜利 (丘比特+人狼情侣)！");
+                    }
+                }
+                // Wolf Couple (Wolf + Wolf) -> Cupid joins Wolf Camp
+                else if (isWolf(l1) && isWolf(l2)) {
+                    // Cupid counts as Wolf side, remove from Gods list for victory check
+                    gods = gods.filter(p => p.role !== '丘比特');
+                }
+            }
+            // -------------------------
+
+            // Victory Condition: Slaughter the Side (屠边)
+            if (wolves.length === 0) return gameOver(true); // Good wins
+            if (gods.length === 0 || villagers.length === 0) return gameOver(false); // Wolf wins
+
+            switch (gameState.subPhase) {
+                case 'cupid': await runCupid(); break;
+                case 'wolf': await runWolf(); break;
+                case 'seer': await runRole('预言家', 'seer_night'); break;
+                case 'guard': await runRole('守卫', 'guard_night'); break;
+                case 'witch': await runWitch(); break;
+                case 'morning': await resolveMorning(); break;
+                case 'election': await runElection(); break;
+                case 'discuss': await runDiscuss(); break;
+                case 'vote': await runVote(); break;
+                case 'review': await runReview(); break;
+            }
+        }
+
+        /**
+         * 5. STREAMING & PARSING (CoT Logic)
+         */
+        async function streamLLM(player, key, instruct) {
+            // Allow dead players to speak during review or hunter skill
+            if (!player.alive && gameState.subPhase !== 'review' && key !== 'hunter_death') return null;
+
+            document.getElementById('activePlayerName').innerText = `${player.id + 1}号`;
+            const card = document.getElementById(`card-${player.id}`);
+            if (card) card.classList.add('active');
+            isStreaming = true;
+
+            let final = "";
+            const outEl = document.getElementById('streamingOutput');
+
+            // Retry Logic
+            let attempts = 0;
+            const maxRetries = appConfig.maxRetries || 3;
+
+            while (attempts < maxRetries) {
+                attempts++;
+                final = "";
+                outEl.innerHTML = `<span class="text-gray-500">尝试 ${attempts}/${maxRetries}...</span>`;
+
+                // Convert internal 0-based IDs to 1-based for Prompt
+                const aliveList = players.filter(p => p.alive).map(p => `${p.id + 1}号`).join(', ');
+
+                // Filter logs: Only show public logs to everyone.
+                const publicLogs = gameState.logs
+                    .filter(l => l.type === 'public' || l.type === 'sys')
+                    .map(l => l.content)
+                    .join('\n');
+
+                const context = `
+[Public History]
+${publicLogs}
+[Private Memory]
+${player.privateMem.join('\n')}
+[Alive Players]
+${aliveList}
+[System]
+Current Phase: ${gameState.subPhase}
+Instruction: ${instruct}`;
+
+                const sys = appConfig.prompts.common + "\n" + appConfig.prompts[key];
+
+                try {
+                    const res = await fetch(`${appConfig.apiBase}/chat/completions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appConfig.apiKey}` },
+                        body: JSON.stringify({
+                            model: player.model,
+                            messages: [{ role: 'system', content: sys }, { role: 'user', content: context }],
+                            temperature: 0.7,
+                            max_tokens: 4096, // HUGE TOKEN LIMIT
+                            stream: true
+                        })
+                    });
+
+                    if (!res.ok) throw new Error(`API Error ${res.status}`);
+
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+                        for (const line of lines) {
+                            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                                try {
+                                    const txt = JSON.parse(line.slice(6)).choices[0].delta.content || "";
+                                    final += txt;
+
+                                    // Visual Formatting
+                                    let displayHtml = escapeHtml(final);
+                                    displayHtml = displayHtml.replace(/<think>/g, '<span class="think-text"><think>');
+                                    displayHtml = displayHtml.replace(/<\/think>/g, '</think></span>');
+                                    displayHtml = displayHtml.replace(/"thought":/g, '<span class="think-text">"thought":</span>');
+                                    displayHtml = displayHtml.replace(/"action":/g, '<span class="json-text">"action":</span>');
+
+                                    outEl.innerHTML = displayHtml + '<span class="cursor"></span>';
+                                    outEl.scrollTop = outEl.scrollHeight;
+                                } catch (e) { }
+                            }
+                        }
+                    }
+
+                    // Check if output is valid JSON
+                    if (parseMixedOutput(final)) {
+                        break; // Success!
+                    } else {
+                        throw new Error("Invalid JSON output");
+                    }
+
+                } catch (e) {
+                    console.error(`Attempt ${attempts} failed:`, e);
+                    document.getElementById('retryIndicator').classList.remove('hidden');
+                    await new Promise(r => setTimeout(r, 1000)); // Wait 1s before retry
+                }
+            }
+
+            document.getElementById('retryIndicator').classList.add('hidden');
+            isStreaming = false;
+            if (card) card.classList.remove('active');
+
+            // Debug Log
+            try {
+                fetch('/api/debug_log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        timestamp: new Date().toISOString(),
+                        player: player.id + 1,
+                        role: player.role,
+                        prompt: { system: sys, user: context },
+                        response: final
+                    })
+                });
+            } catch (e) { }
+
+            player.privateMem.push(`(Self): ${extractActionSummary(final)}`);
+            return final;
+        }
+
+        function extractActionSummary(text) {
+            // Helper to store short memory not the huge thought chain
+            const json = parseMixedOutput(text);
+            if (!json) return "Acted.";
+            if (json.speech) return `Speech: ${json.speech}`;
+            if (json.action) {
+                if (json.target !== undefined) return `Action: ${json.action} -> ${json.target}`;
+                if (json.target1 !== undefined && json.target2 !== undefined) return `Action: ${json.action} -> ${json.target1}, ${json.target2}`;
+                return `Action: ${json.action}`;
+            }
+            return "Acted.";
+        }
+
+        /**
+         * SMART PARSER: Handles Thought Fields & Tags
+         */
+        function parseMixedOutput(text) {
+            if (typeof text !== 'string') return null;
+
+            // Helper to sanitize newlines inside strings (common LLM error)
+            const sanitize = (str) => {
+                return str.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
+                    return match.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+                });
+            };
+
+            // 1. Try Code Blocks First
+            const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/g;
+            const matches = [...text.matchAll(codeBlockRegex)];
+            if (matches.length > 0) {
+                for (let i = matches.length - 1; i >= 0; i--) {
+                    try { return JSON.parse(matches[i][1]); } catch (e) {
+                        try { return JSON.parse(sanitize(matches[i][1])); } catch (e2) { }
+                    }
+                }
+            }
+
+            // 2. Robust JSON Extractor (State Machine)
+            // Finds all top-level balanced {} blocks, handling strings and escapes
+            const candidates = [];
+            let braceStack = 0;
+            let startIndex = -1;
+            let inString = false;
+            let isEscaped = false;
+
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+
+                if (isEscaped) { isEscaped = false; continue; }
+                if (char === '\\') { isEscaped = true; continue; }
+                if (char === '"') { inString = !inString; continue; }
+
+                if (!inString) {
+                    if (char === '{') {
+                        if (braceStack === 0) startIndex = i;
+                        braceStack++;
+                    } else if (char === '}') {
+                        braceStack--;
+                        if (braceStack === 0 && startIndex !== -1) {
+                            candidates.push(text.substring(startIndex, i + 1));
+                            startIndex = -1;
+                        }
+                    }
+                }
+            }
+
+            // Try to parse candidates from last to first (prefer latest output)
+            for (let i = candidates.length - 1; i >= 0; i--) {
+                try { return JSON.parse(candidates[i]); } catch (e) {
+                    try { return JSON.parse(sanitize(candidates[i])); } catch (e2) { }
+                }
+            }
+
+            return null;
+        }
+
+        function addLog(content, type, thoughtContent = null, role = null) {
+            const entry = { content, type, thought: thoughtContent, role };
+            gameState.logs.push(entry);
+            addLogToDom(entry);
+        }
+
+        function addLogToDom(entry) {
+            const div = document.createElement('div');
+            div.className = `log-entry log-${entry.type}`;
+
+            // If there is thought, make a fold
+            if (entry.thought) {
+                const details = document.createElement('details');
+                details.className = 'thought-bubble';
+                details.innerHTML = `
+            <summary>💭 思考过程 (点击展开)</summary>
+            <div class="thought-content">${escapeHtml(entry.thought)}</div>
+        `;
+                div.appendChild(details);
+            }
+
+            const text = document.createElement('div');
+            // For God View (UI), show role if available
+            let displayContent = entry.content;
+            if (entry.role && entry.type === 'public') {
+                displayContent = displayContent.replace(/^(\d+号)/, `$1(${entry.role})`);
+            }
+            text.innerText = displayContent;
+            div.appendChild(text);
+
+            const cont = document.getElementById('gameLog');
+            cont.prepend(div);
+        }
+
+        function processAndLogResponse(playerId, roleName, rawText, isPublic) {
+            if (!rawText) return null;
+            let json = parseMixedOutput(rawText);
+            let thought = null;
+
+            // Extract thought from <think> tags if models use them
+            const thinkMatch = rawText.match(/<think>([\s\S]*?)<\/think>/);
+            if (thinkMatch) thought = thinkMatch[1].trim();
+
+            if (json) {
+                // Extract thought from JSON field
+                if (json.thought || json.reasoning) {
+                    thought = json.thought || json.reasoning;
+                }
+
+                // Construct Clean Log
+                let msg = "";
+                if (json.speech) userMsg = json.speech;
+                else if (json.action) {
+                    if (json.target !== undefined) userMsg = `执行了 ${json.action} -> ${json.target}`;
+                    else if (json.target1 !== undefined && json.target2 !== undefined) userMsg = `执行了 ${json.action} -> ${json.target1}, ${json.target2}`;
+                    else userMsg = `执行了 ${json.action}`;
+                }
+                else userMsg = "进行了思考 (无具体行动)";
+
+                // Convert target from 1-based to 0-based if present
+                if (json.target !== undefined && typeof json.target === 'number') {
+                    json.target = json.target - 1;
+                }
+
+                if (isPublic) {
+                    // IMPORTANT: Do NOT include roleName in the content string stored in logs
+                    // It will be added dynamically for UI display, but kept hidden for AI context
+                    msg = `${playerId + 1}号: ${userMsg}`;
+                } else {
+                    msg = `${roleName}行动: ${userMsg}`;
+                }
+
+                addLog(msg, isPublic ? "public" : "private", thought, isPublic ? roleName : null);
+                return json; // Return parsed action for logic
+            }
+
+            // Fallback if no JSON found
+            addLog(`${playerId + 1}号 (异常输出): 未检测到有效指令`, "private", rawText);
+            return null;
+        }
+
+        /**
+         * 6. ROLE LOGIC WRAPPERS
+         */
+        async function runCupid() {
+            addLog("=== 丘比特请睁眼 ===", "sys");
+            const cupid = players.find(p => p.role === '丘比特' && p.alive);
+            if (cupid) {
+                const raw = await streamLLM(cupid, 'cupid_night', "请选择两名玩家成为情侣 (link)。");
+                const j = processAndLogResponse(cupid.id, '丘比特', raw, false);
+                if (j && j.action === 'link' && j.target1 !== undefined && j.target2 !== undefined) {
+                    const t1 = parseInt(j.target1) - 1;
+                    const t2 = parseInt(j.target2) - 1;
+                    if (players[t1] && players[t2]) {
+                        players[t1].isCouple = true; players[t1].coupleId = t2;
+                        players[t2].isCouple = true; players[t2].coupleId = t1;
+
+                        // Inform lovers about each other's role AND Cupid's identity
+                        const cupidId = cupid.id + 1;
+                        const p1 = players[t1];
+                        const p2 = players[t2];
+                        const isWolf = p => p.role === '狼人' || p.role === '白狼王';
+
+                        let campMsg = "";
+                        // Third Party: Mixed Couple (Wolf + Good)
+                        if (isWolf(p1) !== isWolf(p2)) {
+                            campMsg = `你现在和 ${t1 + 1}号、${t2 + 1}号、${cupidId}号(丘比特) 属于第三方阵营 (人狼恋)。目标是屠城 (淘汰除你们三人外的所有人)。`;
+                        }
+                        // Wolf Camp: Wolf Couple (Wolf + Wolf)
+                        else if (isWolf(p1) && isWolf(p2)) {
+                            campMsg = `你现在属于狼人阵营 (双狼恋)。丘比特(${cupidId}号) 也是你们的队友。`;
+                        }
+                        // Good Camp: Good Couple (Good + Good)
+                        else {
+                            campMsg = `你现在属于好人阵营 (双好人恋)。`;
+                        }
+
+                        p1.privateMem.push(`💘 你被丘比特(${cupidId}号)连成了情侣。你的伴侣是 ${t2 + 1}号，TA的身份是 ${p2.role}。${campMsg}`);
+                        p2.privateMem.push(`💘 你被丘比特(${cupidId}号)连成了情侣。你的伴侣是 ${t1 + 1}号，TA的身份是 ${p1.role}。${campMsg}`);
+
+                        // Also inform Cupid about the camp
+                        if (isWolf(p1) !== isWolf(p2)) {
+                            cupid.privateMem.push(`💘 你连接了 ${t1 + 1}号(${p1.role}) 和 ${t2 + 1}号(${p2.role})。你们三人现在属于第三方阵营 (人狼恋)。目标是屠城。`);
+                        } else if (isWolf(p1) && isWolf(p2)) {
+                            cupid.privateMem.push(`💘 你连接了 ${t1 + 1}号(${p1.role}) 和 ${t2 + 1}号(${p2.role})。你们现在属于狼人阵营 (双狼恋)。`);
+                        } else {
+                            cupid.privateMem.push(`💘 你连接了 ${t1 + 1}号(${p1.role}) 和 ${t2 + 1}号(${p2.role})。你们现在属于好人阵营 (双好人恋)。`);
+                        }
+
+                        gameState.cupidAct = { t1, t2 };
+                    }
+                }
+            }
+            gameState.subPhase = 'wolf';
+            updateHeader();
+        }
+
+        async function runWolf() {
+            addLog("=== 天黑请闭眼 ===", "sys");
+            gameState.nightTarget = -1;
+            const wolves = players.filter(p => (p.role === '狼人' || p.role === '白狼王') && p.alive);
+
+            if (wolves.length === 0) {
+                gameState.subPhase = 'guard';
+                return;
+            }
+
+            // Wolf Discussion Phase
+            let round = 0;
+            let readyToVote = false;
+            const maxRounds = 3;
+
+            addLog(`🐺 狼人开始行动 (存活: ${wolves.map(p => p.id + 1).join(',')})`, "private");
+
+            while (round < maxRounds && !readyToVote) {
+                round++;
+                addLog(`--- 狼人讨论 第 ${round} 轮 ---`, "private");
+
+                for (const p of wolves) {
+                    const teammates = wolves.filter(x => x.id !== p.id).map(x => `${x.id + 1}号`).join(', ');
+                    const instruct = `队友是: ${teammates || '无'}。请讨论战术 (discuss) 或提议直接投票 (vote_proposal)。`;
+
+                    const raw = await streamLLM(p, 'wolf_discuss', instruct);
+                    const j = processAndLogResponse(p.id, '狼人', raw, false);
+
+                    // Share discussion with other wolves
+                    if (j && j.speech) {
+                        const chatMsg = `(队友) ${p.id + 1}号: ${j.speech}`;
+                        wolves.forEach(w => {
+                            if (w.id !== p.id) w.privateMem.push(chatMsg);
+                        });
+                    }
+
+                    if (j && (j.action === 'vote_proposal' || j.action === 'vote')) {
+                        readyToVote = true;
+                        addLog(`${p.id + 1}号 提议开始投票。`, "private");
+                        break; // One wolf calls for vote, we move to vote
+                    }
+                }
+            }
+
+            // Wolf Voting Phase
+            addLog("--- 狼人投票阶段 ---", "private");
+            let votes = {};
+            for (const p of wolves) {
+                const raw = await streamLLM(p, 'wolf_vote', "请投票决定袭击谁 (vote)。");
+                const j = processAndLogResponse(p.id, '狼人', raw, false);
+
+                let t = -1;
+                if (j && j.target !== undefined) t = parseInt(j.target);
+
+                if (t !== -1) {
+                    addLog(`${p.id + 1}号 投给了 ${t + 1}号`, "private");
+                    votes[t] = (votes[t] || 0) + 1;
+                } else {
+                    addLog(`${p.id + 1}号 弃票`, "private");
+                }
+            }
+
+            // Tally Wolf Votes
+            const s = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+            if (s.length > 0) {
+                // Check for tie
+                if (s.length > 1 && s[0][1] === s[1][1]) {
+                    addLog("🐺 狼人意见不统一 (平票)，无人被刀。", "private");
+                    gameState.nightTarget = -1;
+                } else {
+                    gameState.nightTarget = parseInt(s[0][0]);
+                    addLog(`🐺 狼人决定袭击 ${gameState.nightTarget + 1}号`, "private");
+                }
+            } else {
+                addLog("🐺 狼人未做出有效投票，无人被刀。", "private");
+                gameState.nightTarget = -1;
+            }
+
+            gameState.subPhase = 'guard';
+        }
+
+        async function runRole(r, k) {
+            const p = players.find(x => x.role === r && x.alive);
+            if (p) {
+                const raw = await streamLLM(p, k, "请行动。");
+                const j = processAndLogResponse(p.id, r, raw, false);
+                if (j && j.target !== undefined) {
+                    if (r === '预言家') {
+                        const t = parseInt(j.target);
+                        const good = players[t].role !== '狼人' && players[t].role !== '白狼王';
+                        p.privateMem.push(`${t + 1}号是${good ? '好人' : '狼人'}`); // Add to Seer memory
+                    }
+                    if (r === '守卫') gameState.guardLast = parseInt(j.target);
+                }
+            }
+            gameState.subPhase = r === '守卫' ? 'seer' : 'witch';
+            updateHeader();
+        }
+
+        async function runWitch() {
+            const p = players.find(x => x.role === '女巫' && x.alive);
+            gameState.witchAct = { save: false, harmTarget: -1 };
+            if (p) {
+                let i = `昨晚 ${gameState.nightTarget + 1}号 被刀。`;
+                if (gameState.nightTarget === gameState.guardLast) i = "昨晚平安。";
+                const raw = await streamLLM(p, 'witch_night', `${i} 药水状态: 救=${gameState.settings.potion.save}, 毒=${gameState.settings.potion.harm}`);
+                const j = processAndLogResponse(p.id, '女巫', raw, false);
+                if (j) {
+                    if (j.type === 'save' && gameState.settings.potion.save) {
+                        gameState.witchAct.save = true; gameState.settings.potion.save = false;
+                    } else if ((j.type === 'potion_harm' || j.type === 'poison') && gameState.settings.potion.harm) {
+                        gameState.witchAct.harmTarget = parseInt(j.target); gameState.settings.potion.harm = false;
+                    }
+                }
+            }
+            gameState.subPhase = 'morning';
+            updateHeader();
+        }
+
+        async function resolveMorning() {
+            addLog(`=== 第 ${gameState.dayCount} 天 ===`, "sys");
+            let dead = [], w = gameState.nightTarget;
+
+            // Resolve Wolf Kill
+            if (w !== -1) {
+                if (w === gameState.guardLast) {
+                    // Guarded
+                } else if (gameState.witchAct.save) {
+                    // Saved by Witch
+                } else {
+                    dead.push(w);
+                    if (players[w]) players[w].deathReason = 'wolf';
+                }
+            }
+
+            // Resolve Witch Poison
+            if (gameState.witchAct.harmTarget !== -1) {
+                dead.push(gameState.witchAct.harmTarget);
+                if (players[gameState.witchAct.harmTarget]) players[gameState.witchAct.harmTarget].deathReason = 'poison';
+            }
+
+            dead = [...new Set(dead)]; // Unique
+
+            // Announcement
+            if (dead.length === 0) {
+                addLog("昨晚是平安夜。", "public");
+            } else if (dead.length === 1) {
+                addLog(`昨晚是一个可怕的夜晚，${dead[0] + 1}号 死了。`, "public");
+            } else {
+                addLog(`昨晚是一个血腥的夜晚，${dead.map(x => x + 1).join(', ')}号 死了。`, "public");
+            }
+
+            // Process Deaths & Last Words
+            for (const pid of dead) {
+                await handleDeath(pid);
+            }
+
+            if (gameState.dayCount === 1) gameState.subPhase = 'election';
+            else gameState.subPhase = 'discuss';
+
+            gameState.discussIdx = 0;
+            updateHeader();
+        }
+
+        async function handleDeath(pid) {
+            if (!players[pid].alive) return;
+
+            // Last Words (Before killing, so streamLLM works)
+            addLog(`🎤 ${pid + 1}号 发表遗言...`, "public");
+            const raw = await streamLLM(players[pid], 'day_discuss', "你死了。请发表遗言 (speech)。");
+            processAndLogResponse(pid, players[pid].role, raw, true);
+
+            kill(pid);
+
+            // Hunter Skill
+            if (players[pid].role === '猎人') {
+                if (players[pid].deathReason === 'poison') {
+                    addLog(`🔫 猎人被毒杀，无法发动技能。`, "public");
+                } else {
+                    addLog(`🔫 猎人死亡，发动技能...`, "public");
+                    const hRaw = await streamLLM(players[pid], 'hunter_death', "你死了。发动技能带走一人 (fire) 或放弃 (pass)。");
+                    const j = processAndLogResponse(pid, '猎人', hRaw, true);
+
+                    if (j) {
+                        if (j.action === 'fire' && j.target !== undefined) {
+                            const target = parseInt(j.target);
+                            if (players[target] && players[target].alive) {
+                                addLog(`🔫 猎人开枪带走了 ${target + 1}号`, "public");
+                                await handleDeath(target);
+                            } else {
+                                addLog(`🔫 猎人试图带走 ${target + 1}号，但目标无效。`, "public");
+                            }
+                        } else if (j.action === 'pass') {
+                            addLog(`🔫 猎人放弃发动技能。`, "public");
+                        } else {
+                            addLog(`🔫 猎人未能发动技能 (指令不清)。`, "public");
+                        }
+                    } else {
+                        addLog(`🔫 猎人未能发动技能 (无响应)。`, "public");
+                    }
+                }
+            }
+        }
+
+        async function runElection() {
+            addLog("=== 警长竞选 ===", "sys");
+            const candidates = [];
+            // 1. Run for Sheriff
+            for (const p of players.filter(x => x.alive)) {
+                const raw = await streamLLM(p, 'sheriff_election', "是否竞选警长？(run/pass)");
+                const j = processAndLogResponse(p.id, p.role, raw, true);
+                if (j && j.action === 'run') candidates.push(p.id);
+            }
+
+            if (candidates.length === 0) {
+                addLog("无人竞选警长。", "public");
+            } else if (candidates.length === 1) {
+                gameState.sheriffId = candidates[0];
+                players[candidates[0]].isSheriff = true;
+                addLog(`${candidates[0] + 1}号 自动当选警长！`, "public");
+            } else {
+                // 2. Vote
+                addLog(`候选人: ${candidates.map(id => id + 1).join(', ')}。请投票。`, "public");
+                let votes = {};
+                const voters = players.filter(p => p.alive && !candidates.includes(p.id));
+
+                if (voters.length === 0) {
+                    addLog("所有人都竞选了，无法投票，警徽流失。", "public");
+                } else {
+                    for (const p of voters) {
+                        const cList = candidates.map(id => `${id + 1}号`).join(', ');
+                        const raw = await streamLLM(p, 'sheriff_vote', `候选人：${cList}。请投票 (vote)。`);
+                        const j = processAndLogResponse(p.id, p.role, raw, true);
+                        if (j && j.target !== undefined) {
+                            const t = parseInt(j.target);
+                            if (candidates.includes(t)) {
+                                votes[t] = (votes[t] || 0) + 1;
+                                addLog(`🗳️ ${p.id + 1}号 投给了 ${t + 1}号`, "public");
+                            }
+                        }
+                    }
+                    // Tally
+                    const s = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+                    console.log("Election Votes:", votes, "Sorted:", s); // Debug Log
+
+                    if (s.length > 0 && (s.length === 1 || s[0][1] > s[1][1])) {
+                        const winner = parseInt(s[0][0]);
+                        gameState.sheriffId = winner;
+                        players[winner].isSheriff = true;
+                        addLog(`${winner + 1}号 当选警长！`, "public");
+                    } else {
+                        addLog("平票或无人投票，警徽流失。", "public");
+                    }
+                }
+            }
+            gameState.subPhase = 'discuss';
+            updateHeader();
+        }
+
+        async function runDiscuss() {
+            const a = players.filter(p => p.alive);
+            // Sort speakers: Sheriff last
+            if (gameState.sheriffId !== -1) {
+                const sIdx = a.findIndex(p => p.id === gameState.sheriffId);
+                if (sIdx !== -1) {
+                    const sheriff = a.splice(sIdx, 1)[0];
+                    a.push(sheriff);
+                }
+            }
+
+            if (gameState.discussIdx < a.length) {
+                const p = a[gameState.discussIdx];
+                let promptKey = 'day_discuss';
+                if (p.role === '白狼王') promptKey = 'white_wolf_king_discuss';
+
+                const raw = await streamLLM(p, promptKey, "请发言。");
+                const j = processAndLogResponse(p.id, p.role, raw, true); // Public log
+
+                // White Wolf King Self-Destruct
+                if (p.role === '白狼王' && j && j.action === 'self_destruct' && j.target !== undefined) {
+                    const t = parseInt(j.target);
+                    addLog(`💥 白狼王自爆！带走了 ${t + 1}号！`, "public");
+                    kill(p.id); // King dies
+                    if (players[t] && players[t].alive) {
+                        await handleDeath(t);
+                    }
+                    // Skip to night
+                    gameState.subPhase = 'wolf';
+                    gameState.phase = 'night';
+                    updateHeader();
+                    return;
+                }
+
+                gameState.discussIdx++;
+            } else gameState.subPhase = 'vote';
+            updateHeader();
+        }
+
+        async function runVote() {
+            addLog("=== 投票阶段 ===", "sys");
+            let v = {}; const a = players.filter(p => p.alive && p.canVote);
+            for (const p of a) {
+                const raw = await streamLLM(p, 'day_vote', "请投票。");
+                const j = processAndLogResponse(p.id, p.role, raw, true);
+                let t = -1;
+                if (j && j.target !== undefined) t = parseInt(j.target);
+                else { const o = a.filter(x => x.id !== p.id); if (o.length) t = o[Math.floor(Math.random() * o.length)].id; } // fallback
+
+                let weight = 1;
+                if (p.isSheriff) {
+                    weight = 1.5;
+                    addLog(`🗳️ ${p.id + 1}号(警长) 投给了 ${t + 1}号 (1.5票)`, "public");
+                } else {
+                    addLog(`🗳️ ${p.id + 1}号 投给了 ${t + 1}号`, "public");
+                }
+
+                v[t] = (v[t] || 0) + weight;
+            }
+            // Tally
+            const s = Object.entries(v).sort((a, b) => b[1] - a[1]);
+            if (s.length && s[0][1] > (s[1]?.[1] || 0)) {
+                const o = parseInt(s[0][0]);
+
+                // Idiot Reveal Logic
+                if (players[o].role === 'Baichi' && !players[o].isIdiotRevealed) {
+                    addLog(`${o + 1}号 被公投出局... 等等！`, "public");
+                    addLog(`🤡 ${o + 1}号 翻牌：我是Baichi！免疫本次放逐！`, "public");
+                    players[o].isIdiotRevealed = true;
+                    players[o].canVote = false; // Lose vote right
+                } else {
+                    addLog(`${o + 1}号 被公投出局。`, "public");
+                    await handleDeath(o);
+                }
+            } else addLog("平票，无人出局。", "public");
+
+            gameState.dayCount++;
+            gameState.subPhase = 'wolf';
+            gameState.phase = 'night';
+            updateHeader();
+        }
+
+        async function runReview() {
+            if (!gameState.reviewRound) gameState.reviewRound = 1;
+            if (gameState.reviewIdx === undefined) gameState.reviewIdx = 0;
+            const maxReviewRounds = 2;
+
+            // Check if round completed
+            if (gameState.reviewIdx >= players.length) {
+                gameState.reviewIdx = 0;
+                gameState.reviewRound++;
+            }
+
+            // Check if all rounds completed
+            if (gameState.reviewRound > maxReviewRounds) {
+                addLog("=== 复盘结束 ===", "sys");
+                gameState.status = 'ended'; // Final end
+                document.getElementById('autoPlay').checked = false;
+                return;
+            }
+
+            if (gameState.reviewIdx === 0) {
+                addLog(`=== 赛后复盘 第 ${gameState.reviewRound} 轮 ===`, "sys");
+            }
+
+            // Reveal all roles for the prompt
+            const allRoles = players.map(p => `${p.id + 1}号(${p.role})`).join(', ');
+            const p = players[gameState.reviewIdx];
+
+            try {
+                // Even dead players speak in review
+                const instruct = `所有玩家身份已公开：${allRoles}。请点评本局游戏，分析胜负原因，或者聊聊你的心路历程。`;
+                const raw = await streamLLM(p, 'game_review', instruct);
+                processAndLogResponse(p.id, p.role, raw, true);
+            } catch (e) {
+                console.error(`Player ${p.id} review failed:`, e);
+                addLog(`${p.id + 1}号 似乎不想说话 (连接失败或输出异常)。`, "public");
+            }
+
+            gameState.reviewIdx++;
+            updateHeader();
+        }
+
+        /**
+         * 7. HELPERS & UI UTILS
+         */
+        function kill(i) {
+            if (players[i] && players[i].alive) {
+                players[i].alive = false;
+                // Lovers Logic
+                if (players[i].isCouple) {
+                    const partnerId = players[i].coupleId;
+                    if (players[partnerId] && players[partnerId].alive) {
+                        addLog(`💔 ${i + 1}号 死了，${partnerId + 1}号 殉情随之而去。`, "public");
+                        kill(partnerId);
+                    }
+                }
+                // Sheriff Transfer Logic (Simplified: Sheriff dies, badge lost for now, or implement transfer later)
+                if (players[i].isSheriff) {
+                    addLog(`👮 警长 ${i + 1}号 死亡，警徽流失（暂未实现移交）。`, "public");
+                    players[i].isSheriff = false;
+                    gameState.sheriffId = -1;
+                }
+            }
+        }
+        function gameOver(g, msg) {
+            gameState.status = 'gameover'; // Mark as gameover but continue to review
+            const m = msg ? msg : (g ? "🏆 好人胜利" : "🌙 狼人胜利");
+            addLog(m, "sys");
+
+            // Transition to Review
+            gameState.subPhase = 'review';
+            gameState.reviewRound = 1;
+            gameState.reviewIdx = 0; // Reset index
+            updateHeader();
+
+            // If auto-play is on, it will continue to review in next gameStep
+            // If not, user can click "Next Step"
+        }
+        function clearLogs() { document.getElementById('gameLog').innerHTML = ''; }
+        function escapeHtml(t) { if (!t) return ""; return t.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">"); }
+        function updateHeader() {
+            const m = { 'cupid': '丘比特', 'wolf': '狼人', 'seer': '预言', 'witch': '女巫', 'guard': '守卫', 'election': '竞选', 'discuss': '发言', 'vote': '投票', 'review': '复盘' };
+            document.getElementById('phaseDisplay').innerText = `Day ${gameState.dayCount} · ${m[gameState.subPhase] || ''}`;
+        }
+        function getAvatar(r) { return { '狼人': '🐺', '白狼王': '🐺👑', '村民': '👱', '预言家': '🔮', '女巫': '🧪', '猎人': '🔫', '守卫': '🛡️', '丘比特': '💘', 'Baichi': '🤡' }[r] || '❓'; }
+        function toggleAuto() { const c = document.getElementById('autoPlay'); c.checked = !c.checked; if (c.checked) gameStep(); }
+
+        // UI Builders
+        function adjustPlayerCount(delta) {
+            const current = appConfig.rolesSetup.length;
+            const next = current + delta;
+            if (next < 6 || next > 16) return;
+
+            if (delta > 0) {
+                appConfig.rolesSetup.push('村民');
+                appConfig.modelsSetup.push(availableModels[0] || 'gpt-3.5-turbo');
+                appConfig.personasSetup.push('');
+            } else {
+                appConfig.rolesSetup.pop();
+                appConfig.modelsSetup.pop();
+                appConfig.personasSetup.pop();
+            }
+            initRoleConfig();
+        }
+
+        function initRoleConfig() {
+            const c = document.getElementById('roleConfigList');
+            c.innerHTML = '';
+            const count = appConfig.rolesSetup.length;
+            document.getElementById('playerCountDisplay').innerText = count;
+
+            for (let i = 0; i < count; i++) {
+                c.innerHTML += `
+        <div class="flex gap-1 items-center bg-black/20 p-1 rounded border border-gray-700">
+            <span class="text-xs text-gray-500 w-4 text-center">${i + 1}</span>
+            <select id="role-${i}" onchange="appConfig.rolesSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-pink-400 border border-gray-600 w-16">
+                ${['狼人', '白狼王', '村民', '预言家', '女巫', '猎人', '守卫', '丘比特', 'Baichi'].map(x => `<option value="${x}"${appConfig.rolesSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
+            </select>
+            <select id="model-${i}" onchange="appConfig.modelsSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-blue-300 border border-gray-600 flex-1 w-24 truncate">
+                ${availableModels.map(x => `<option value="${x}"${appConfig.modelsSetup[i] === x ? 'selected' : ''}>${x}</option>`).join('')}
+            </select>
+            <input type="text" id="persona-${i}" placeholder="性格/人设" onchange="appConfig.personasSetup[${i}]=this.value; saveGlobalSettings();" class="bg-gray-900 text-[10px] rounded p-1 text-gray-300 border border-gray-600 w-20" value="${appConfig.personasSetup?.[i] || ''}">
+        </div>`;
+            }
+        }
+
+        function updatePromptEditorList() {
+            const s = document.getElementById('promptSelect'); s.innerHTML = '';
+            Object.keys(appConfig.prompts).forEach(k => {
+                s.innerHTML += `<option value="${k}">${k}</option>`;
+            });
+            loadPromptToEdit();
+        }
+        function loadPromptToEdit() {
+            const k = document.getElementById('promptSelect').value;
+            document.getElementById('promptText').value = appConfig.prompts[k];
+        }
+        function saveCurrentPrompt() {
+            const k = document.getElementById('promptSelect').value;
+            appConfig.prompts[k] = document.getElementById('promptText').value;
+            // saveGlobalSettings(); // No longer auto-save to config, user must save preset
+        }
+
+        async function resetPrompts(updateUI = true) {
+            try {
+                const res = await fetch('/api/default_prompt');
+                appConfig.prompts = await res.json();
+                if (updateUI) {
+                    updatePromptEditorList();
+                    alert("已恢复默认 Prompt");
+                }
+            } catch (e) { console.error("Failed to load default prompt"); }
+        }
+
+        // Preset Management
+        async function refreshPresetList() {
+            const s = document.getElementById('presetSelect');
+            s.innerHTML = '<option value="">-- 选择预设 --</option>';
+            try {
+                const res = await fetch('/api/presets');
+                const files = await res.json();
+                files.forEach(f => {
+                    s.innerHTML += `<option value="${f}">${f}</option>`;
+                });
+            } catch (e) { }
+        }
+
+        async function loadPreset() {
+            const name = document.getElementById('presetSelect').value;
+            if (!name) return;
+            try {
+                const res = await fetch(`/api/presets/${name}`);
+                appConfig.prompts = await res.json();
+                updatePromptEditorList();
+                alert(`已加载预设: ${name}`);
+            } catch (e) { alert("加载失败"); }
+        }
+
+        async function savePreset() {
+            const name = prompt("请输入预设名称 (例如: my_custom_prompts):");
+            if (!name) return;
+            try {
+                await fetch(`/api/presets/${name}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(appConfig.prompts)
+                });
+                refreshPresetList();
+                alert("预设保存成功!");
+            } catch (e) { alert("保存失败"); }
+        }
+
+        async function deletePreset() {
+            const name = document.getElementById('presetSelect').value;
+            if (!name) return;
+            if (!confirm(`确定删除预设 ${name}?`)) return;
+            try {
+                await fetch(`/api/presets/${name}`, { method: 'DELETE' });
+                refreshPresetList();
+            } catch (e) { alert("删除失败"); }
+        }
+
+        async function fetchModels() {
+            try {
+                const r = await fetch(`${appConfig.apiBase}/models`, { headers: { 'Authorization': `Bearer ${appConfig.apiKey}` } });
+                const d = await r.json();
+                availableModels = d.data.map(m => m.id);
+                initRoleConfig();
+                alert(`已刷新 ${availableModels.length} 个模型`);
+            } catch (e) { alert("获取模型失败"); }
+        }
+
+        function toggleSettings() { document.getElementById('settingsModal').classList.toggle('active'); }
+        function renderGrid() {
+            const g = document.getElementById('playersGrid'); g.innerHTML = '';
+            players.forEach(p => {
+                g.innerHTML += `
+        <div id="card-${p.id}" class="role-card rounded p-2 flex flex-col items-center justify-center aspect-square relative bg-gray-800 ${!p.alive ? 'dead' : ''}">
+            <div class="text-2xl mb-1">${p.alive ? p.avatar : '💀'}</div>
+            <div class="text-[10px] ${p.role === '狼人' ? 'text-red-400' : 'text-blue-300'}">${p.role}</div>
+            <div class="absolute top-0 left-1 text-[9px] opacity-50">#${p.id + 1}</div>
+        </div>`;
+            });
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+
+</html>

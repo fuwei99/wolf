@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.vscode/
+.idea/
+saves/*
+!saves/.gitkeep
+presets/*
+!presets/.gitkeep
+logs/*
+!logs/.gitkeep
+config.json
+.git/
+.gitignore
+Dockerfile
+.dockerignore
